@@ -24,13 +24,13 @@ Use this skill when the user wants to:
 Write the arranged score under:
 
 ```text
-_build/xml/
+assets/_build/xml/
 ```
 
 Use a deterministic filename:
 
 ```text
-_build/xml/<basename>.<tag>.musicxml
+assets/_build/xml/<basename>.<tag>.musicxml
 ```
 
 ## Input model

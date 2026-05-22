@@ -74,8 +74,8 @@ The input path is provided as `$ARGUMENTS`.
 
 If no argument is given:
 
-- look first in `_build/xml/`
-- then look in `songs/xml/`
+- look first in `assets/_build/xml/`
+- then look in `assets/xml/`
 - otherwise search the current working directory for `.musicxml` and `.mxl`
 
 ## Output
@@ -83,13 +83,13 @@ If no argument is given:
 Write results under:
 
 ```text
-_build/midi/
+assets/_build/midi/
 ```
 
 Examples:
 
-- `_build/xml/foo.musicxml` -> `_build/midi/foo.mid`
-- `scores/bar.mxl` -> `_build/midi/bar.mid`
+- `assets/_build/xml/foo.musicxml` -> `assets/_build/midi/foo.mid`
+- `scores/bar.mxl` -> `assets/_build/midi/bar.mid`
 
 ## Workflow
 

@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "mix_report.json",
+  "type": "object",
+  "required": ["files", "timing", "levels", "musical_warnings", "suggested_next_actions"],
+  "properties": {
+    "files": {
+      "type": "object",
+      "required": ["instrumental", "vocal", "final"],
+      "properties": {
+        "instrumental": {"type": "string"},
+        "vocal": {"type": "string"},
+        "final": {"type": "string"}
+      }
+    },
+    "timing": {
+      "type": "object",
+      "properties": {
+        "vocal_start_seconds": {"type": "number"},
+        "detected_offset_warning": {"type": "boolean"},
+        "instrumental_duration_seconds": {"type": "number"},
+        "vocal_duration_seconds": {"type": "number"}
+      }
+    },
+    "levels": {
+      "type": "object",
+      "properties": {
+        "vocal_peak_dbfs": {"type": "number"},
+        "instrumental_peak_dbfs": {"type": "number"},
+        "final_peak_dbfs": {"type": "number"}
+      }
+    },
+    "musical_warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["measure", "type", "message"],
+        "properties": {
+          "measure": {"type": "integer", "minimum": 1},
+          "type": {"type": "string"},
+          "message": {"type": "string"}
+        }
+      }
+    },
+    "suggested_next_actions": {"type": "array", "items": {"type": "string"}}
+  }
+}

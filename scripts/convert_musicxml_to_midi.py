@@ -14,9 +14,9 @@ except Exception as e:
     raise
 
 ROOT = Path(__file__).resolve().parents[1]
-XML_DIR = ROOT / 'xml'
-MIDI_DIR = ROOT / 'midi'
-MIDI_DIR.mkdir(exist_ok=True)
+XML_DIR = ROOT / "assets" / "xml"
+MIDI_DIR = ROOT / "assets" / "_build" / "midi"
+MIDI_DIR.mkdir(parents=True, exist_ok=True)
 
 files = [
     XML_DIR / 'Bjornen_sover.musicxml',

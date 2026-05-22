@@ -10,8 +10,8 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "scripts" / "arrange_score.py"
-FIXTURE = REPO / "songs" / "xml" / "G_Minor_Bach_Original.mxl"
-OLD_MAC_FIXTURE = REPO / "_build" / "xml" / "Old-MacDonald.safe.mxl"
+FIXTURE = REPO / "assets" / "xml" / "G_Minor_Bach_Original.mxl"
+OLD_MAC_FIXTURE = REPO / "assets" / "_build" / "xml" / "Old-MacDonald.safe.mxl"
 
 
 class ArrangeScoreTests(unittest.TestCase):
@@ -35,7 +35,7 @@ class ArrangeScoreTests(unittest.TestCase):
             return output, tree.getroot(), summary
 
     def test_default_output_goes_to_build_xml(self):
-        expected = REPO / "_build" / "xml" / "G_Minor_Bach_Original.hiphop-dark.musicxml"
+        expected = REPO / "assets" / "_build" / "xml" / "G_Minor_Bach_Original.hiphop-dark.musicxml"
         if expected.exists():
             expected.unlink()
         try:

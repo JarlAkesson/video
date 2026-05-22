@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "analysis.json",
+  "type": "object",
+  "required": ["score", "lyrics", "warnings"],
+  "properties": {
+    "score": {
+      "type": "object",
+      "required": ["tempo_bpm", "meter", "key", "measure_count", "parts", "phrases", "harmony", "melody_candidates"],
+      "properties": {
+        "tempo_bpm": {"type": "number"},
+        "meter": {"type": "string"},
+        "key": {"type": "string"},
+        "measure_count": {"type": "integer", "minimum": 1},
+        "parts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "name", "range", "role_guess"],
+            "properties": {
+              "id": {"type": "string"},
+              "name": {"type": "string"},
+              "range": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 2,
+                "items": {"type": "string"}
+              },
+              "role_guess": {"type": "string"},
+              "density_score": {"type": "number", "minimum": 0, "maximum": 1}
+            }
+          }
+        },
+        "phrases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "measures"],
+            "properties": {
+              "id": {"type": "string"},
+              "measures": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 2,
+                "items": {"type": "integer", "minimum": 1}
+              },
+              "cadence_guess": {"type": "string"},
+              "melody_candidate_part": {"type": "string"}
+            }
+          }
+        },
+        "harmony": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["measure", "beat", "chord_guess"],
+            "properties": {
+              "measure": {"type": "integer", "minimum": 1},
+              "beat": {"type": "number", "minimum": 0},
+              "chord_guess": {"type": "string"}
+            }
+          }
+        },
+        "melody_candidates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["source_part", "measures", "note_count", "singability_score", "range"],
+            "properties": {
+              "source_part": {"type": "string"},
+              "measures": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 2,
+                "items": {"type": "integer", "minimum": 1}
+              },
+              "note_count": {"type": "integer", "minimum": 0},
+              "singability_score": {"type": "number", "minimum": 0, "maximum": 1},
+              "range": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 2,
+                "items": {"type": "string"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "lyrics": {
+      "type": "object",
+      "required": ["language", "lines"],
+      "properties": {
+        "language": {"type": "string"},
+        "lines": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "text", "syllables", "syllable_count"],
+            "properties": {
+              "id": {"type": "string"},
+              "text": {"type": "string"},
+              "syllables": {"type": "array", "items": {"type": "string"}},
+              "syllable_count": {"type": "integer", "minimum": 0}
+            }
+          }
+        }
+      }
+    },
+    "warnings": {"type": "array", "items": {"type": "string"}}
+  }
+}

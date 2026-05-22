@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "diffsinger_input.json",
+  "type": "object",
+  "required": ["text", "ph_seq", "note_seq", "note_dur_seq", "is_slur_seq", "input_type"],
+  "properties": {
+    "text": {"type": "string"},
+    "ph_seq": {"type": "string"},
+    "note_seq": {"type": "string"},
+    "note_dur_seq": {"type": "string"},
+    "is_slur_seq": {"type": "string"},
+    "input_type": {"type": "string", "enum": ["word", "phoneme"]},
+    "metadata": {"type": "object"}
+  }
+}

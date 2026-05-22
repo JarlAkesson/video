@@ -1,6 +1,6 @@
 ---
 name: sheet2xml
-description: Convert sheet-music PDFs or images into MusicXML using an open-source OMR workflow. Prefer Audiveris for recognition, save outputs under _build/xml/, and report recognition weaknesses that need manual cleanup.
+description: Convert sheet-music PDFs or images into MusicXML using an open-source OMR workflow. Prefer Audiveris for recognition, save outputs under assets/_build/xml/, and report recognition weaknesses that need manual cleanup.
 allowed-tools: Read Bash Grep Glob Write
 argument-hint: [sheet-file-or-directory]
 effort: medium
@@ -52,7 +52,13 @@ Typical check:
 command -v audiveris
 ```
 
-If that fails, check the common Linux installer path:
+Also check common alternate command names:
+
+```bash
+command -v Audiveris
+```
+
+If those fail, check the common Linux installer path:
 
 ```bash
 test -x /opt/audiveris/bin/Audiveris
@@ -63,7 +69,8 @@ Use the first working executable you find.
 Preferred resolution order:
 
 1. `audiveris`
-2. `/opt/audiveris/bin/Audiveris`
+2. `Audiveris`
+3. `/opt/audiveris/bin/Audiveris`
 
 On Linux, also check:
 
@@ -81,9 +88,10 @@ If Audiveris is present:
 If Audiveris is missing:
 
 - stop before attempting conversion
-- tell the user that no Audiveris executable was found
-- ask whether they want help installing it
-- only continue after the tool is available
+- tell the user that no Audiveris executable was found on `$PATH` and not at `/opt/audiveris/bin/Audiveris`
+- ask the user where Audiveris is installed (request a full path to the executable)
+- if the user does not have it installed, then ask whether they want help installing it
+- only continue after a working executable path is provided or discovered
 
 Do not silently switch to another OMR engine.
 
@@ -93,8 +101,8 @@ The input path is provided as `$ARGUMENTS`.
 
 If no argument is given:
 
-- first look in `songs/sheets/` for likely score files
-- if `songs/sheets/` does not exist or contains no matching files, then look in the current working directory
+- first look in `assets/sheets/` for likely score files
+- if `assets/sheets/` does not exist or contains no matching files, then look in the current working directory
 - prefer `.pdf`, `.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff`
 
 ## Output
@@ -102,22 +110,22 @@ If no argument is given:
 Write results under:
 
 ```text
-_build/xml/
+assets/_build/xml/
 ```
 
 Also write a conversion log under:
 
 ```text
-_build/xml/logs/
+assets/_build/xml/logs/
 ```
 
 Use the base filename of the source score.
 
 Examples:
 
-- `songs/foo.pdf` -> `_build/xml/foo.musicxml`
-- `scans/bar.png` -> `_build/xml/bar.musicxml`
-- `songs/foo.pdf` -> `_build/xml/logs/foo.audiveris.log`
+- `assets/sheets/foo.pdf` -> `assets/_build/xml/foo.musicxml`
+- `assets/sheets/bar.png` -> `assets/_build/xml/bar.musicxml`
+- `assets/sheets/foo.pdf` -> `assets/_build/xml/logs/foo.audiveris.log`
 
 ## Workflow
 
@@ -125,8 +133,8 @@ Examples:
 2. If the input is a PDF, determine whether it appears to be born-digital or scanned; do not assume recognition quality.
 3. On Linux, if no usable X server is available, run Audiveris through `xvfb-run`.
 4. Run Audiveris.
-5. Save the full Audiveris stdout/stderr log in `_build/xml/logs/`.
-6. Export MusicXML into `_build/xml/`.
+5. Save the full Audiveris stdout/stderr log in `assets/_build/xml/logs/`.
+6. Export MusicXML into `assets/_build/xml/`.
 7. Check whether the output file was actually produced.
 8. Read the log and report likely weak spots:
    - polyphonic passages

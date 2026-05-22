@@ -280,15 +280,17 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--input",
-        default="songs/xml/G_Minor_Bach_Original.mxl",
+        default="assets/xml/G_Minor_Bach_Original.mxl",
         type=Path,
     )
     parser.add_argument(
         "--output",
-        default="songs/xml/G_Minor_Bach_With_Violin.musicxml",
+        default="assets/_build/xml/G_Minor_Bach_With_Violin.musicxml",
         type=Path,
     )
     args = parser.parse_args()
+
+    args.output.parent.mkdir(parents=True, exist_ok=True)
 
     root = load_root(args.input)
     part_list = root.find("part-list")

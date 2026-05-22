@@ -425,12 +425,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--input",
-        default="songs/xml/G_Minor_Bach_With_Violin.musicxml",
+        default="assets/_build/xml/G_Minor_Bach_With_Violin.musicxml",
         type=Path,
     )
     parser.add_argument(
         "--output",
-        default="songs/xml/Bach_Hiphop_Remix_F_Minor.musicxml",
+        default="assets/_build/xml/Bach_Hiphop_Remix_F_Minor.musicxml",
         type=Path,
     )
     args = parser.parse_args()

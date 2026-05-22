@@ -234,15 +234,17 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--input",
-        default="songs/xml/G_Minor_Bach_With_Violin.musicxml",
+        default="assets/_build/xml/G_Minor_Bach_With_Violin.musicxml",
         type=Path,
     )
     parser.add_argument(
         "--output",
-        default="songs/xml/G_Minor_Bach_With_Violin_And_Drums_Swagger.musicxml",
+        default="assets/_build/xml/G_Minor_Bach_With_Violin_And_Drums_Swagger.musicxml",
         type=Path,
     )
     args = parser.parse_args()
+
+    args.output.parent.mkdir(parents=True, exist_ok=True)
 
     root = ET.parse(args.input).getroot()
     part_list = root.find("part-list")

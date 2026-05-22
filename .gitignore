@@ -13,4 +13,8 @@ Desktop.ini
 .env
 .env.*
 
-_build/
+.github/
+.claude/settings.json
+assets/
+**/__pycache__/
+third_party/

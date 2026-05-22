@@ -49,7 +49,7 @@ The input path is provided as `$ARGUMENTS`.
 
 If no argument is given:
 
-- look first in `_build/midi/`
+- look first in `assets/_build/midi/`
 - otherwise search the current working directory for `.mid` and `.midi`
 
 ## Output
@@ -57,21 +57,21 @@ If no argument is given:
 Write rendered audio under:
 
 ```text
-_build/audio/
+assets/_build/audio/
 ```
 
 Also write render logs under:
 
 ```text
-_build/audio/logs/
+assets/_build/audio/logs/
 ```
 
 Default output should be WAV unless the user explicitly asks for another format.
 
 Examples:
 
-- `_build/midi/foo.mid` -> `_build/audio/foo.wav`
-- `demo/bar.mid` -> `_build/audio/bar.wav`
+- `assets/_build/midi/foo.mid` -> `assets/_build/audio/foo.wav`
+- `demo/bar.mid` -> `assets/_build/audio/bar.wav`
 
 ## Required asset
 
@@ -120,11 +120,11 @@ Do not assume that `-F` alone guarantees a pure offline render on every build.
 1. Resolve MIDI inputs.
 2. Resolve a SoundFont.
 3. Resolve a FluidSynth executable.
-4. Create `_build/audio/logs/` if needed.
+4. Create `assets/_build/audio/logs/` if needed.
 5. Run a short test render first on one MIDI file before launching a batch job.
 6. If the test render touches a blocked realtime audio path or hangs, switch to a stricter offline invocation or rerun outside the sandbox.
-7. Render each MIDI file to WAV in `_build/audio/` using the validated render profile unless the user asked otherwise.
-8. Capture the full FluidSynth output into a per-file log under `_build/audio/logs/`.
+7. Render each MIDI file to WAV in `assets/_build/audio/` using the validated render profile unless the user asked otherwise.
+8. Capture the full FluidSynth output into a per-file log under `assets/_build/audio/logs/`.
 9. If the user wants MP3 or another delivery format, convert from WAV with ffmpeg.
 10. Verify that output files exist and are non-empty.
 11. Read the render log and summarize whether the run succeeded cleanly or with warnings.

@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "vocal_events.json",
+  "type": "object",
+  "required": ["global", "vocal_events", "arrangement_notes", "warnings"],
+  "properties": {
+    "global": {
+      "type": "object",
+      "required": ["tempo_bpm", "meter", "language", "style"],
+      "properties": {
+        "tempo_bpm": {"type": "number"},
+        "meter": {"type": "string"},
+        "language": {"type": "string"},
+        "style": {"type": "string"}
+      }
+    },
+    "vocal_events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "measure", "start_beat", "duration_beats", "pitch", "lyric", "word", "line_id", "is_slur", "breath_after"],
+        "properties": {
+          "id": {"type": "string"},
+          "measure": {"type": "integer", "minimum": 1},
+          "start_beat": {"type": "number", "minimum": 0},
+          "duration_beats": {"type": "number", "exclusiveMinimum": 0},
+          "pitch": {"type": "string"},
+          "lyric": {"type": "string"},
+          "word": {"type": "string"},
+          "line_id": {"type": "string"},
+          "phonemes": {"type": ["array", "null"], "items": {"type": "string"}},
+          "is_slur": {"type": "boolean"},
+          "breath_after": {"type": "boolean"}
+        }
+      }
+    },
+    "arrangement_notes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["measure", "issue", "suggestion"],
+        "properties": {
+          "measure": {"type": "integer", "minimum": 1},
+          "issue": {"type": "string"},
+          "suggestion": {"type": "string"}
+        }
+      }
+    },
+    "warnings": {"type": "array", "items": {"type": "string"}}
+  }
+}

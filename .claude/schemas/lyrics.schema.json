@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "lyrics.json",
+  "type": "object",
+  "required": ["lyrics", "warnings"],
+  "properties": {
+    "lyrics": {
+      "type": "object",
+      "required": ["language", "lines"],
+      "properties": {
+        "language": { "type": "string" },
+        "lines": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "text", "syllables", "syllable_count"],
+            "properties": {
+              "id": { "type": "string" },
+              "text": { "type": "string" },
+              "syllables": { "type": "array", "items": { "type": "string" } },
+              "syllable_count": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    "warnings": { "type": "array", "items": { "type": "string" } }
+  }
+}
+

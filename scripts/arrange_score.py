@@ -1116,7 +1116,7 @@ def build_output_path(source_score: Path, goal: str, preset: str, explicit_outpu
     if explicit_output:
         return Path(explicit_output)
     tag = slugify(preset if preset != "none" else goal)
-    return Path("_build/xml") / f"{source_score.stem}.{tag}.musicxml"
+    return Path("assets/_build/xml") / f"{source_score.stem}.{tag}.musicxml"
 
 
 def arrange_score(spec: PreferenceSpec, output_path: Path) -> dict[str, object]:

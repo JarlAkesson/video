@@ -1,0 +1,11 @@
+# Python deps for repo scripts (pip)
+#
+# Note: this repo currently does not include `.venv/`.
+# These pins reflect what is installed in the current system Python where available.
+
+numpy==2.3.4
+pillow==11.1.0
+
+# Required by multiple scripts but not installed in the current system Python:
+music21
+

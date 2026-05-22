@@ -1,0 +1,18 @@
+# External tools used by skills/scripts (versioned)
+#
+# Versions captured on 2026-05-22 from this machine.
+
+Audiveris==5.10.2 (/opt/audiveris/bin/Audiveris) commit=1b7cf44088c68f4168801822a613751d1bb1b584
+java==21.0.10 (OpenJDK Runtime Environment build 21.0.10+7-Ubuntu-125.10) pkg=openjdk-21-jre=21.0.10+7-1~25.10
+musescore3==3.2.3+dfsg2-19
+ffmpeg==7:7.1.1-1ubuntu4.2
+fluidsynth==2.4.7+dfsg-2
+sox==14.4.2+git20190427-5build1
+tesseract-ocr==5.5.0-1
+xvfb==2:21.1.18-1ubuntu1.1 (provides xvfb-run)
+
+# Download helpers (used as optional fallbacks):
+aria2c==1.37.0
+curl==8.12.1
+wget==1.25.0
+
