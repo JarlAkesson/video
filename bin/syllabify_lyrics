@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+VENV_PY="$ROOT/.venv/bin/python"
+
+if [[ -x "$VENV_PY" ]]; then
+  exec "$VENV_PY" "$ROOT/scripts/syllabify_lyrics.py" "$@"
+fi
+
+exec python3 "$ROOT/scripts/syllabify_lyrics.py" "$@"
+
