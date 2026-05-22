@@ -6,13 +6,18 @@ import csv
 import os
 import re
 import subprocess
+import threading
 import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
+
+_DUCKDUCKGO_BLOCKED = False
+_CONVERT_LOCK = threading.Lock()
 
 
 def _slug(s: str) -> str:
@@ -183,6 +188,13 @@ def _download(url: str, out_path: Path, timeout_sec: float = 60.0) -> None:
         out_path.write_bytes(resp.read())
 
 
+def _nonempty(path: Path) -> bool:
+    try:
+        return path.exists() and path.stat().st_size > 0
+    except OSError:
+        return False
+
+
 def _format_priority(fmt: str) -> int:
     f = (fmt or "").strip().lower()
     if f in {"musicxml", "xml", "musicxml.gz"}:
@@ -235,6 +247,7 @@ def _guess_format_from_url(url: str) -> str:
 
 def _search_duckduckgo_urls(query: str, max_results: int = 10, timeout_sec: float = 30.0) -> list[str]:
     # Best-effort HTML scraping (no API key). May break if DDG changes.
+    global _DUCKDUCKGO_BLOCKED  # noqa: PLW0603 - simple cross-call signal
     q = urllib.parse.quote_plus(query)
     url = f"https://duckduckgo.com/html/?q={q}"
     req = urllib.request.Request(
@@ -247,10 +260,13 @@ def _search_duckduckgo_urls(query: str, max_results: int = 10, timeout_sec: floa
     try:
         with urllib.request.urlopen(req, timeout=timeout_sec) as resp:  # nosec - expected for controlled URLs
             html = resp.read().decode("utf-8", errors="ignore")
-    except urllib.error.HTTPError:
-        # Some environments get blocked (403). Treat as "no results" rather than failing the run.
+    except urllib.error.HTTPError as e:
+        # Some environments get blocked (403/429). Treat as "no results" rather than failing the run,
+        # but record that it happened so callers can emit a clearer warning.
+        if getattr(e, "code", None) in {403, 429}:
+            _DUCKDUCKGO_BLOCKED = True
         return []
-    except urllib.error.URLError:
+    except (urllib.error.URLError, TimeoutError, OSError):
         return []
 
     urls: list[str] = []
@@ -322,7 +338,7 @@ def _candidate_urls_for_song(title: str, max_candidates: int) -> list[tuple[str,
 
 def _strip_html_to_text(html: str) -> str:
     # Very lightweight cleanup: remove tags, keep some line breaks.
-    text = re.sub(r"(?is)<(script|style)[^>]*>.*?</\\1>", " ", html)
+    text = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", html)
     text = re.sub(r"(?is)<br\\s*/?>", "\n", text)
     text = re.sub(r"(?is)</p\\s*>", "\n\n", text)
     text = re.sub(r"(?is)<[^>]+>", " ", text)
@@ -349,6 +365,226 @@ def _download_text(url: str, timeout_sec: float = 60.0) -> str:
     if "<html" in text.lower():
         return _strip_html_to_text(text)
     return text.strip()
+
+
+def _mediawiki_title_variants(title: str) -> list[str]:
+    # MediaWiki titles use underscores for spaces and preserve diacritics.
+    base = title.strip().replace(" ", "_")
+    if not base:
+        return []
+    translit = (
+        base.replace("å", "a")
+        .replace("ä", "a")
+        .replace("ö", "o")
+        .replace("Å", "A")
+        .replace("Ä", "A")
+        .replace("Ö", "O")
+    )
+    out = [base]
+    if translit != base:
+        out.append(translit)
+    return out
+
+
+def _candidate_lyric_urls_for_song(title: str) -> list[str]:
+    # A few deterministic sources that often work for Swedish children's songs.
+    candidates: list[str] = []
+    for t in _mediawiki_title_variants(title):
+        candidates.append(f"https://sv.wikisource.org/wiki/{urllib.parse.quote(t)}?action=raw")
+        candidates.append(f"https://sv.wikipedia.org/wiki/{urllib.parse.quote(t)}?action=raw")
+        candidates.append(f"https://sv.wikisource.org/wiki/{urllib.parse.quote(t)}")
+        candidates.append(f"https://sv.wikipedia.org/wiki/{urllib.parse.quote(t)}")
+    return candidates
+
+
+def _strip_mediawiki_markup(text: str) -> str:
+    # Minimal "good enough" cleanup for wiki raw text.
+    # Keep it conservative: remove templates/refs/tables/files/categories and most formatting.
+    text = re.sub(r"(?s)<!--.*?-->", " ", text)
+    text = re.sub(r"(?s)<ref[^>]*>.*?</ref>", " ", text)
+    text = re.sub(r"(?s)<ref[^/]*/>", " ", text)
+    text = re.sub(r"(?s)\{\{.*?\}\}", " ", text)
+    text = re.sub(r"(?m)^\s*\|.*$", " ", text)  # tables
+    text = re.sub(r"(?m)^\s*\{\|.*$", " ", text)
+    text = re.sub(r"(?m)^\s*\|\}.*$", " ", text)
+    text = re.sub(r"(?mi)^\s*\[\[(Category|Fil|File):.*?\]\]\s*$", " ", text)
+    # Replace MediaWiki links: [[Page]] or [[Page|Label]] -> Label (or Page).
+    text = re.sub(r"\[\[(?:[^\]\|]*\|)?([^\]]+)\]\]", r"\1", text)
+    text = re.sub(r"(?i)</?poem\s*>", "", text)
+    text = re.sub(r"(?mi)^\s*kategori\s*:\s*.*$", " ", text)
+    text = re.sub(r"(?m)^\s*\}+\s*$", " ", text)
+    text = re.sub(r"''+", "", text)  # bold/italic markers
+    text = unicodedata.normalize("NFKC", text)
+    text = re.sub(r"[ \t\r\f\v]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _strip_stanza_numbers(text: str) -> str:
+    # Remove common stanza numbering styles while preserving blank lines.
+    lines: list[str] = []
+    for raw in text.splitlines():
+        s = raw.strip()
+        if re.fullmatch(r"(\(?\d{1,2}\)?[.)]?|vers\s+\d{1,2}[.:]?)", s, flags=re.IGNORECASE):
+            continue
+        lines.append(raw)
+    return "\n".join(lines)
+
+
+def _extract_swedish_block(text: str) -> str | None:
+    # Heuristic extractor for pages that include many languages (e.g. Brother Jakob).
+    # Expect a "Svenska" marker followed by indented lyric lines (often prefixed with ":" or "::").
+    lines = text.splitlines()
+    start = None
+    for i, ln in enumerate(lines):
+        if ln.strip().lower() == "svenska":
+            start = i + 1
+            break
+    if start is None:
+        return None
+
+    out: list[str] = []
+    for ln in lines[start:]:
+        if not ln.strip():
+            if out:
+                break
+            continue
+        if ln.lstrip().startswith(":"):
+            out.append(ln)
+            continue
+        # Stop at the next language header / section header.
+        if re.fullmatch(r"[A-Za-zÅÄÖåäö][A-Za-zÅÄÖåäö \-]{0,40}", ln.strip()):
+            break
+        if ln.strip().startswith("=="):
+            break
+    if not out:
+        return None
+    return "\n".join(out).strip()
+
+
+def _expand_repeat_markers(lines: list[str]) -> list[str]:
+    # Expand simple repeat markers like ":||: ... :||" by duplicating the inner content.
+    out: list[str] = []
+    pat = re.compile(r"^\s*:?\|\|:\s*(.*?)\s*:?\|\|\s*$")
+    for ln in lines:
+        m = pat.match(ln)
+        if m:
+            inner = m.group(1).strip()
+            if inner:
+                out.append(inner)
+                out.append(inner)
+            continue
+        out.append(ln)
+    return out
+
+
+def _lyrics_to_full_text(text: str) -> tuple[str, list[str]]:
+    # Convert to a plain lyric block: no wiki headings, no indent markers, no repeat symbols.
+    notes: list[str] = []
+    raw_lines = text.splitlines()
+    kept: list[str] = []
+    for ln in raw_lines:
+        s = ln.strip()
+        if not s:
+            kept.append("")
+            continue
+        if s.startswith(("==", "=", "Ursprung", "Övrigt", "På olika språk")):
+            continue
+        if s.lower().startswith(("franska", "tyska", "engelska", "danska", "norska", "finska", "ryska", "latin")):
+            # Likely language sections; keep only the selected block upstream.
+            continue
+        if s.startswith(":"):
+            s = s.lstrip(":").strip()
+        kept.append(s)
+
+    kept = _expand_repeat_markers(kept)
+    # Remove any remaining repeat tokens inline (minor).
+    kept2: list[str] = []
+    for ln in kept:
+        ln2 = ln.replace(":||:", "").replace(":||", "").replace("||:", "").replace("||", "")
+        kept2.append(ln2.strip())
+
+    text2 = "\n".join(kept2)
+    text2 = _strip_stanza_numbers(text2)
+    text2 = re.sub(r"\n{3,}", "\n\n", text2).strip()
+    if text2 != text:
+        notes.append("normalized to plain lyrics (no repeats/markup)")
+    return text2 + "\n", notes
+
+
+def _lyrics_quality_fix(text: str, title: str) -> tuple[bool, str, list[str]]:
+    """
+    Return (ok, fixed_text, notes).
+    - ok=False means "obviously not lyrics" (JS/HTML dump, navigation, etc.) and caller should retry another URL.
+    - ok=True may still include minor cleanups (stanza numbers, headings).
+    """
+    notes: list[str] = []
+    t = (text or "").strip()
+    if not t:
+        return False, "", ["empty text"]
+
+    # If the page includes poem blocks, prefer them (often the cleanest lyric content).
+    poem_blocks = re.findall(r"(?is)<poem[^>]*>(.*?)</poem>", t)
+    if poem_blocks:
+        t = "\n\n".join(p.strip() for p in poem_blocks if p.strip()).strip()
+
+    # Fast "obviously wrong" filters.
+    bad_markers = [
+        "rlconf",
+        "rlstate",
+        "rlpagemodules",
+        "mw.config",
+        "mw.loader",
+        "function(",
+        "document.cookie",
+        "<script",
+        "<style",
+        "<html",
+        "<head",
+    ]
+    low = t.lower()
+    if any(m in low for m in bad_markers):
+        return False, "", ["looks like page JS/HTML, not lyrics"]
+
+    # If HTML tags remain in quantity, treat as wrong (we expect plain-ish text at this stage).
+    if len(re.findall(r"</?[a-zA-Z][^>]{0,60}>", t)) >= 8:
+        return False, "", ["looks like HTML page body, not lyrics"]
+
+    # Minor cleanups.
+    t2 = t
+    t2 = t2.replace("\r\n", "\n").replace("\r", "\n")
+    t2 = unicodedata.normalize("NFKC", t2)
+    t2 = re.sub(r"[ \t]+\n", "\n", t2)
+    t2 = re.sub(r"\n{3,}", "\n\n", t2)
+
+    # Strip a leading title line if it matches the song title tokens strongly.
+    lines = t2.splitlines()
+    if lines:
+        first = lines[0].strip()
+        toks = _title_tokens(title)
+        hay = _normalize_for_match(first)
+        if toks and sum(1 for tok in toks[:4] if tok in hay) >= max(2, min(3, len(toks[:4]))):
+            notes.append("removed leading title line")
+            t2 = "\n".join(lines[1:]).lstrip()
+
+    t2 = _strip_stanza_numbers(t2)
+
+    # If this looks like a multi-language page, try to isolate Swedish lyrics.
+    sw_block = _extract_swedish_block(t2)
+    if sw_block:
+        t2 = sw_block
+
+    # Convert to plain lyric block and expand/remove repeat markers.
+    t2, more_notes = _lyrics_to_full_text(t2)
+    notes.extend(more_notes)
+
+    # Keep only if we have enough "lyric-like" content (letters on multiple lines).
+    lyric_lines = [ln for ln in t2.splitlines() if re.search(r"[A-Za-zÅÄÖåäö]", ln)]
+    if len("".join(lyric_lines)) < 80 or len(lyric_lines) < 3:
+        # Too short: could be a stub page, a redirect, or metadata only.
+        return False, "", ["too little lyric content after cleanup"]
+
+    return True, t2.strip() + "\n", notes
 
 
 def _resolve_audiveris() -> list[str] | None:
@@ -505,6 +741,13 @@ def main() -> None:
         action="store_true",
         help="Do not attempt lyrics search/download.",
     )
+    ap.add_argument(
+        "--jobs",
+        type=int,
+        default=8,
+        help="Max concurrent per-song workers for network-bound steps (downloads/lyrics). Conversions are serialized.",
+    )
+    ap.add_argument("--force", action="store_true", help="Re-download/overwrite even if outputs already exist.")
     ap.add_argument("--display", type=str, default=":1", help="X11 DISPLAY for Audiveris (default ':1').")
     ap.add_argument(
         "--verify-downloads",
@@ -552,17 +795,303 @@ def main() -> None:
     for row in rows:
         by_song.setdefault(row.number, []).append(row)
 
-    for number, song_rows in sorted(by_song.items(), key=lambda kv: kv[0]):
-        processed += 1
+    def _process_song(number: str, song_rows: list[Row]) -> tuple[str, list[str], int, int, int, int]:
+        # Returns: (number, report_section_lines, found_delta, skipped_delta, converted_delta, convert_failed_delta)
+        local_found = 0
+        local_skipped = 0
+        local_converted = 0
+        local_convert_failed = 0
+
         title = song_rows[0].title
         status = song_rows[0].status
         composer_or_origin = song_rows[0].composer_or_origin
-        report_lines.append(f"## Song #{number}: {title}\n")
+
+        lines: list[str] = []
+        lines.append(f"## Song #{number}: {title}\n")
 
         if status.upper().startswith("SKYDDAD"):
-            skipped += 1
-            report_lines.append("Status: SKIPPED (SKYDDAD)\n")
-            continue
+            local_skipped += 1
+            lines.append("Status: SKIPPED (SKYDDAD)\n")
+            return number, lines, local_found, local_skipped, local_converted, local_convert_failed
+
+        # Everything below is the prior per-song logic, but writing into `lines` and local counters.
+        candidates: list[tuple[str, str, str]] = []  # (fmt, url, source)
+        if args.search_direct:
+            for fmt, url in _candidate_urls_for_song(title, max(1, int(args.max_direct_candidates))):
+                if args.no_pdf and fmt.upper() == "PDF":
+                    continue
+                candidates.append((fmt, url, "duckduckgo"))
+
+        for r in sorted(song_rows, key=lambda rr: _format_priority(rr.fmt)):
+            if args.no_pdf and r.fmt.upper() == "PDF":
+                continue
+            candidates.append((r.fmt.strip().upper(), r.url, r.source))
+
+        seen: set[str] = set()
+        deduped: list[tuple[str, str, str]] = []
+        for fmt, url, src in candidates:
+            if url in seen:
+                continue
+            seen.add(url)
+            deduped.append((fmt, url, src))
+
+        if not deduped:
+            lines.append("Status: NOT FOUND\n")
+            lines.append("Search notes:\n")
+            lines.append("- No eligible candidates.\n")
+            return number, lines, local_found, local_skipped, local_converted, local_convert_failed
+
+        deduped.sort(key=lambda t: _format_priority(t[0]))
+        lines.append("Tried candidates (in priority order):\n")
+        for fmt, url, src in deduped:
+            lines.append(f"- {fmt} | {src} | {url}\n")
+
+        lines.append("\nGoal per song: PDF sheet + MusicXML/MXL + MIDI + lyrics.\n")
+        lines.append("Priority: obtain MusicXML or MIDI first; then export the rest from it.\n")
+
+        song_slug = _slug(title)
+        canonical_musicxml = build_xml_dir / f"{number}_{song_slug}.musicxml"
+        canonical_midi = build_midi_dir / f"{number}_{song_slug}.mid"
+        canonical_pdf = build_sheets_dir / f"{number}_{song_slug}.pdf"
+        canonical_lyrics = args.lyrics_dir / f"{number}_{song_slug}.txt"
+
+        warnings: list[str] = []
+        have_xml_or_midi = False
+
+        lines.append("\nStep 1: Download XML/MIDI (preferred)\n")
+        primary_kind = ""
+        primary_path: Path | None = None
+        for fmt, url, src in [t for t in deduped if t[0].upper() in {"MUSICXML", "XML", "MXL", "MSCZ", "MIDI", "MID"}]:
+            ext_guess = {
+                "MIDI": "mid",
+                "MID": "mid",
+                "MXL": "mxl",
+                "MSCZ": "mscz",
+                "MUSICXML": "musicxml",
+                "XML": "musicxml",
+            }.get(fmt.upper(), "bin")
+            base = f"{number}_{song_slug}_{_slug(src)}"
+            out_dir = args.midi_dir if fmt.upper() in {"MIDI", "MID"} else args.xml_dir
+            out_path = out_dir / f"{base}.{ext_guess}"
+            try:
+                if not args.force and _nonempty(out_path):
+                    primary_kind = fmt.upper()
+                    primary_path = out_path
+                    have_xml_or_midi = True
+                    lines.append(f"- Already have `{out_path}` (skipped download)\n")
+                    break
+                _download(url, out_path)
+                local_found += 1
+                primary_kind = fmt.upper()
+                primary_path = out_path
+                have_xml_or_midi = True
+                lines.append(f"- Downloaded `{out_path}` | Source: {url} | Format: {fmt}\n")
+                if args.verify_downloads:
+                    for w in _verify_downloaded_file(out_path, title):
+                        warnings.append(f"{out_path.name}: {w}")
+                break
+            except (urllib.error.URLError, TimeoutError, ValueError, OSError) as e:
+                lines.append(f"- FAILED {fmt} {url}: {type(e).__name__}: {e}\n")
+
+        lines.append("\nStep 2: Export remaining formats from primary (best-effort)\n")
+        xml_for_exports: Path | None = None
+        if primary_path is not None and not args.no_convert:
+            with _CONVERT_LOCK:
+                if primary_kind in {"MIDI", "MID"}:
+                    if not args.force and _nonempty(canonical_musicxml):
+                        have_xml_or_midi = True
+                        xml_for_exports = canonical_musicxml
+                        lines.append(f"- Already have `{canonical_musicxml}` (skipped conversion)\n")
+                    else:
+                        ok, msg = _musescore_export_midi_to_musicxml(primary_path, canonical_musicxml)
+                        if ok:
+                            have_xml_or_midi = True
+                            xml_for_exports = canonical_musicxml
+                            lines.append(f"- Derived `{canonical_musicxml}` | Engine: musescore3 | Input: `{primary_path}`\n")
+                        else:
+                            warnings.append(f"MIDI→MusicXML failed: {msg}")
+                            lines.append(f"- MIDI→MusicXML FAILED: {msg}\n")
+                else:
+                    xml_for_exports = primary_path
+                    if not args.force and _nonempty(canonical_midi):
+                        lines.append(f"- Already have `{canonical_midi}` (skipped conversion)\n")
+                    else:
+                        ok, msg = _musescore_export_musicxml_to_midi(xml_for_exports, canonical_midi)
+                        if ok:
+                            lines.append(f"- Derived `{canonical_midi}` | Engine: musescore3 | Input: `{xml_for_exports}`\n")
+                        else:
+                            warnings.append(f"MusicXML→MIDI failed: {msg}")
+                            lines.append(f"- MusicXML→MIDI FAILED: {msg}\n")
+
+                if xml_for_exports is not None:
+                    if not args.force and _nonempty(canonical_pdf):
+                        lines.append(f"- Already have `{canonical_pdf}` (skipped conversion)\n")
+                    else:
+                        ok, msg = _musescore_export_musicxml_to_pdf(xml_for_exports, canonical_pdf)
+                        if ok:
+                            lines.append(f"- Derived `{canonical_pdf}` | Engine: musescore3 | Input: `{xml_for_exports}`\n")
+                        else:
+                            warnings.append(f"MusicXML→PDF failed: {msg}")
+                            lines.append(f"- MusicXML→PDF FAILED: {msg}\n")
+
+        lines.append("\nStep 3: If primary conversion failed, try downloading missing formats separately\n")
+        if primary_path is not None:
+            if not canonical_musicxml.exists():
+                lines.append("- Missing MusicXML/MXL after conversion; trying separate download.\n\n")
+            if not canonical_pdf.exists():
+                lines.append("- Missing PDF sheet after conversion; trying separate download.\n\n")
+        else:
+            lines.append("- No XML/MIDI downloaded.\n\n")
+
+        lines.append("Fallback: Download PDF sheets\n\n")
+        if not have_xml_or_midi and not args.no_pdf:
+            lines.append("Step 1 did not yield XML/MIDI. Trying PDF candidates.\n")
+            pdf_downloaded = False
+            for fmt, url, src in [t for t in deduped if t[0].upper() == "PDF"]:
+                base = f"{number}_{song_slug}_{_slug(src)}"
+                out_path = args.sheets_dir / f"{base}.pdf"
+                try:
+                    if not args.force and _nonempty(out_path):
+                        lines.append(f"- Already have `{out_path}` (skipped download)\n")
+                        pdf_downloaded = True
+                        break
+                    _download(url, out_path)
+                    local_found += 1
+                    lines.append(f"- Downloaded `{out_path}` | Source: {url} | Format: PDF\n")
+                    pdf_downloaded = True
+                    if args.verify_downloads:
+                        for w in _verify_downloaded_file(out_path, title):
+                            warnings.append(f"{out_path.name}: {w}")
+                    if args.convert_pdf_to_mxl and (audiveris_cmd is not None) and not args.no_convert:
+                        with _CONVERT_LOCK:
+                            mxl_path, log_path = _audiveris_export_pdf_to_mxl(
+                                audiveris_cmd=audiveris_cmd,
+                                pdf_path=out_path,
+                                out_dir=build_xml_dir,
+                                log_dir=build_xml_logs_dir,
+                                tmp_dir=build_tmp_audiveris_dir,
+                                display=args.display,
+                            )
+                        if mxl_path is not None:
+                            local_converted += 1
+                            lines.append(f"- Exported MusicXML `{mxl_path}` | Engine: audiveris | Log: `{log_path}`\n")
+                        else:
+                            local_convert_failed += 1
+                            warnings.append(f"PDF→MXL failed; see log {log_path}")
+                            lines.append(f"- MusicXML export FAILED | Log: `{log_path}`\n")
+                    break
+                except (urllib.error.URLError, TimeoutError, ValueError, OSError) as e:
+                    lines.append(f"- FAILED PDF {url}: {type(e).__name__}: {e}\n")
+            if not pdf_downloaded:
+                warnings.append("No MIDI/XML found and no PDF downloaded; moving on to next song.")
+
+        lines.append("\nStep 4: Lyrics\n")
+        if not args.no_lyrics:
+            if not args.force and _nonempty(canonical_lyrics):
+                lines.append(f"- Already have `{canonical_lyrics}` (skipped download)\n")
+            else:
+                lyric_downloaded = False
+                primary_lyric_urls = _candidate_lyric_urls_for_song(title)
+                for lyric_url in primary_lyric_urls[:6]:
+                    try:
+                        timeout = 20.0 if lyric_url.endswith("?action=raw") else 25.0
+                        text = _download_text(lyric_url, timeout_sec=timeout)
+                        if lyric_url.endswith("?action=raw") and "wiki" in lyric_url:
+                            text = _strip_mediawiki_markup(text)
+                        ok, fixed, notes = _lyrics_quality_fix(text, title)
+                        if not ok:
+                            raise ValueError("; ".join(notes))
+                        canonical_lyrics.write_text(fixed, encoding="utf-8")
+                        local_found += 1
+                        note_s = f" | Notes: {', '.join(notes)}" if notes else ""
+                        lines.append(f"- Downloaded `{canonical_lyrics}` | Source: {lyric_url}{note_s}\n")
+                        lyric_downloaded = True
+                        break
+                    except Exception as e:
+                        lines.append(f"- Lyrics FAILED {lyric_url}: {type(e).__name__}: {e}\n")
+
+                if not lyric_downloaded:
+                    lyric_urls: list[str] = []
+                    queries = [
+                        f"\"{title}\" sångtext",
+                        f"\"{title}\" text",
+                        f"\"{title}\" lyrics",
+                        f"\"{title}\" {composer_or_origin} sångtext" if composer_or_origin else "",
+                    ]
+                    queries = [q for q in queries if q]
+                    for q in queries:
+                        lyric_urls.extend(_search_duckduckgo_urls(q, max_results=5))
+                    lyric_urls = _dedupe_preserve_order([u for u in lyric_urls if u.startswith(("http://", "https://"))])
+                    if not lyric_urls:
+                        if _DUCKDUCKGO_BLOCKED:
+                            warnings.append(
+                                "DuckDuckGo search appears blocked (HTTP 403/429); lyric search may be incomplete."
+                            )
+                            lines.append("- No lyric URLs found (DuckDuckGo blocked).\n")
+                        else:
+                            warnings.append("No lyric URLs found via search.")
+                            lines.append("- No lyric URLs found via search.\n")
+                    else:
+                        for lyric_url in lyric_urls[:6]:
+                            try:
+                                timeout = 20.0 if lyric_url.endswith("?action=raw") else 25.0
+                                text = _download_text(lyric_url, timeout_sec=timeout)
+                                if lyric_url.endswith("?action=raw") and "wiki" in lyric_url:
+                                    text = _strip_mediawiki_markup(text)
+                                ok, fixed, notes = _lyrics_quality_fix(text, title)
+                                if not ok:
+                                    raise ValueError("; ".join(notes))
+                                canonical_lyrics.write_text(fixed, encoding="utf-8")
+                                local_found += 1
+                                note_s = f" | Notes: {', '.join(notes)}" if notes else ""
+                                lines.append(f"- Downloaded `{canonical_lyrics}` | Source: {lyric_url}{note_s}\n")
+                                lyric_downloaded = True
+                                break
+                            except Exception as e:
+                                lines.append(f"- Lyrics FAILED {lyric_url}: {type(e).__name__}: {e}\n")
+                        if not lyric_downloaded:
+                            warnings.append("Lyrics download failed for all tried URLs.")
+        else:
+            lines.append("- Skipped (`--no-lyrics`).\n")
+
+        if warnings:
+            lines.append("\nWarnings:\n")
+            for w in warnings:
+                lines.append(f"- {w}\n")
+
+        have_xml = (
+            primary_kind in {"MUSICXML", "XML", "MXL"}
+            or canonical_musicxml.exists()
+            or any(build_xml_dir.glob(f"{number}_{song_slug}.*"))
+            or any(args.xml_dir.glob(f"{number}_{song_slug}_*.*"))
+        )
+        if args.xml_only:
+            lines.append("\nStatus: FOUND\n" if have_xml else "\nStatus: NOT FOUND\n")
+        else:
+            lines.append("\nStatus: FOUND\n" if (primary_path is not None) else "\nStatus: NOT FOUND\n")
+
+        return number, lines, local_found, local_skipped, local_converted, local_convert_failed
+
+    song_items = sorted(by_song.items(), key=lambda kv: kv[0])
+    processed = len(song_items)
+    max_workers = max(1, int(args.jobs))
+    results: dict[str, tuple[list[str], int, int, int, int]] = {}
+
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futs = {ex.submit(_process_song, number, song_rows): number for number, song_rows in song_items}
+        for fut in as_completed(futs):
+            number = futs[fut]
+            n, lines, f_delta, s_delta, c_delta, cf_delta = fut.result()
+            results[n] = (lines, f_delta, s_delta, c_delta, cf_delta)
+
+    for number, _song_rows in song_items:
+        lines, f_delta, s_delta, c_delta, cf_delta = results[number]
+        report_lines.extend(lines)
+        found += f_delta
+        skipped += s_delta
+        converted += c_delta
+        convert_failed += cf_delta
+        continue
 
         candidates: list[tuple[str, str, str]] = []  # (fmt, url, source)
         if args.search_direct:
@@ -601,11 +1130,10 @@ def main() -> None:
         report_lines.append("Priority: obtain MusicXML or MIDI first; then export the rest from it.\n")
 
         song_slug = _slug(title)
-        canonical_musicxml = build_xml_dir / "swedish_children" / f"{number}_{song_slug}.musicxml"
+        canonical_musicxml = build_xml_dir / f"{number}_{song_slug}.musicxml"
         canonical_midi = build_midi_dir / f"{number}_{song_slug}.mid"
         canonical_pdf = build_sheets_dir / f"{number}_{song_slug}.pdf"
         canonical_lyrics = args.lyrics_dir / f"{number}_{song_slug}.txt"
-        (build_xml_dir / "swedish_children").mkdir(parents=True, exist_ok=True)
 
         warnings: list[str] = []
         have_xml_or_midi = False
@@ -794,32 +1322,63 @@ def main() -> None:
 
         report_lines.append("\nStep 4: Lyrics\n")
         if not args.no_lyrics:
-            queries = [
-                f"\"{title}\" sångtext",
-                f"\"{title}\" text",
-                f"\"{title}\" lyrics",
-                f"\"{title}\" {composer_or_origin} sångtext" if composer_or_origin else "",
-            ]
-            queries = [q for q in queries if q]
-            lyric_urls: list[str] = []
-            for q in queries:
-                lyric_urls.extend(_search_duckduckgo_urls(q, max_results=5))
-            lyric_urls = _dedupe_preserve_order([u for u in lyric_urls if u.startswith(("http://", "https://"))])
-            if not lyric_urls:
-                warnings.append("No lyric URLs found via search.")
-                report_lines.append("- No lyric URLs found via search.\n")
-            else:
-                lyric_url = lyric_urls[0]
+            lyric_downloaded = False
+            primary_lyric_urls = _candidate_lyric_urls_for_song(title)
+            for lyric_url in primary_lyric_urls[:6]:
                 try:
-                    text = _download_text(lyric_url)
+                    timeout = 20.0 if lyric_url.endswith("?action=raw") else 25.0
+                    text = _download_text(lyric_url, timeout_sec=timeout)
+                    if lyric_url.endswith("?action=raw") and "wiki" in lyric_url:
+                        text = _strip_mediawiki_markup(text)
                     if not text:
                         raise ValueError("empty lyric text after extraction")
                     canonical_lyrics.write_text(text + "\n", encoding="utf-8")
                     found += 1
                     report_lines.append(f"- Downloaded `{canonical_lyrics}` | Source: {lyric_url}\n")
+                    lyric_downloaded = True
+                    break
                 except Exception as e:
-                    warnings.append(f"Lyrics download failed: {type(e).__name__}: {e}")
                     report_lines.append(f"- Lyrics FAILED {lyric_url}: {type(e).__name__}: {e}\n")
+
+            if lyric_downloaded:
+                pass
+            else:
+                lyric_urls: list[str] = []
+                queries = [
+                    f"\"{title}\" sångtext",
+                    f"\"{title}\" text",
+                    f"\"{title}\" lyrics",
+                    f"\"{title}\" {composer_or_origin} sångtext" if composer_or_origin else "",
+                ]
+                queries = [q for q in queries if q]
+                for q in queries:
+                    lyric_urls.extend(_search_duckduckgo_urls(q, max_results=5))
+                lyric_urls = _dedupe_preserve_order([u for u in lyric_urls if u.startswith(("http://", "https://"))])
+                if not lyric_urls:
+                    if _DUCKDUCKGO_BLOCKED:
+                        warnings.append("DuckDuckGo search appears blocked (HTTP 403/429); lyric search may be incomplete.")
+                        report_lines.append("- No lyric URLs found (DuckDuckGo blocked).\n")
+                    else:
+                        warnings.append("No lyric URLs found via search.")
+                        report_lines.append("- No lyric URLs found via search.\n")
+                else:
+                    for lyric_url in lyric_urls[:6]:
+                        try:
+                            timeout = 20.0 if lyric_url.endswith("?action=raw") else 25.0
+                            text = _download_text(lyric_url, timeout_sec=timeout)
+                            if lyric_url.endswith("?action=raw") and "wiki" in lyric_url:
+                                text = _strip_mediawiki_markup(text)
+                            if not text:
+                                raise ValueError("empty lyric text after extraction")
+                            canonical_lyrics.write_text(text + "\n", encoding="utf-8")
+                            found += 1
+                            report_lines.append(f"- Downloaded `{canonical_lyrics}` | Source: {lyric_url}\n")
+                            lyric_downloaded = True
+                            break
+                        except Exception as e:
+                            report_lines.append(f"- Lyrics FAILED {lyric_url}: {type(e).__name__}: {e}\n")
+                    if not lyric_downloaded:
+                        warnings.append("Lyrics download failed for all tried URLs.")
         else:
             report_lines.append("- Skipped (`--no-lyrics`).\n")
 
@@ -833,7 +1392,7 @@ def main() -> None:
         have_xml = (
             primary_kind in {"MUSICXML", "XML", "MXL"}
             or canonical_musicxml.exists()
-            or any((build_xml_dir / "swedish_children").glob(f"{number}_{song_slug}.*"))
+            or any(build_xml_dir.glob(f"{number}_{song_slug}.*"))
             or any(args.xml_dir.glob(f"{number}_{song_slug}_*.*"))
         )
         if args.xml_only:

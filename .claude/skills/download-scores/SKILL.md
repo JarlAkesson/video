@@ -60,6 +60,19 @@ For each song:
 4. If you cannot find any MIDI or MusicXML after best effort, **fall back to PDF + lyrics**, and move on to the next song.
 5. If you tried your best and still couldn’t find the required artifacts, **move on** (do not get stuck).
 
+## Lyrics quality checks (required)
+
+When downloading lyrics (usually separate from MIDI/MusicXML):
+
+1. Prefer deterministic sources first (e.g. Wikisource/Wikipedia `?action=raw` when available) over scraping full HTML.
+2. Python may do **only structural extraction/normalization** (e.g. HTML → text, MediaWiki `?action=raw` → plain text).
+3. Any **semantic** quality checks and repairs should be done by the LLM:
+   - detect when the fetched text is not lyrics (article prose, navigation, JS/config dumps, multi-language sections, etc.)
+   - decide which block is “the lyrics” when multiple candidates exist
+   - normalize to “full text format” with no repeat signs (e.g. expand `:||:` repeats), and remove/standardize stanza numbering when present
+4. If the LLM judges the text unusable, retry with the next candidate URL.
+5. Record retries and the final cleaning decisions in the per-song report entry.
+
 ## File Naming Convention
 
 Every downloaded file must follow this pattern:
