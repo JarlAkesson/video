@@ -5,6 +5,19 @@ It combines music arrangement, AI-generated singing, and video production.
 
 ---
 
+## Getting the project
+
+**Option 1 — Download as a ZIP** (no tools required):
+Go to [github.com/MoeenNehzati/video](https://github.com/MoeenNehzati/video),
+click the green **Code** button, and choose **Download ZIP**.
+
+**Option 2 — Clone with git** (command line):
+```bash
+git clone https://github.com/MoeenNehzati/video
+```
+
+---
+
 ## How the project is organized
 
 This project uses two places to store files.
