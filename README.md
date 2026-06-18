@@ -47,7 +47,9 @@ Sheet music (PDF/image)
 
 ### Requirements
 
-See `requirements/` for pinned snapshots of Python and tool dependencies.
+See [requirements/README.md](requirements/README.md) for setup instructions.
+There are three things to install: a Python venv, a conda environment for DiffSinger,
+and a set of system tools (MuseScore, FluidSynth, Audiveris, ffmpeg, etc.).
 
 ---
 
