@@ -1,37 +1,72 @@
-# Video music pipeline (research workspace)
+# Children's Music Video Pipeline
 
-This repo is a scratchpad for an end-to-end music pipeline (sheet/MusicXML → arrangement → MIDI/audio → vocals → mix).
+This project turns sheet music into entertaining music videos for children.
+It combines music arrangement, AI-generated singing, and video production.
 
-## Wrapper entrypoints (`bin/`)
+---
 
-`bin/` contains small bash wrappers that invoke the corresponding `scripts/*.py`.
+## How the project is organized
 
-- They prefer `.venv/bin/python` if it exists; otherwise they fall back to `python3`.
-- Run them as `./bin/<name> ...`, or add `./bin` to your `PATH`.
+This project uses two places to store files.
 
-Current wrappers:
+**This repository (GitHub)** stores text-based files: scripts, skill definitions,
+lyrics as plain text, song catalogs, and documentation. Only text files belong
+here — things you can open in a text editor and read directly.
 
-- `bin/analyze_inputs`
-- `bin/analyze_music`
-- `bin/download_scores`
-- `bin/mix_and_validate`
-- `bin/plan_and_align_vocals`
-- `bin/syllabify_lyrics`
-- `bin/synthesize_vocal_with_diffsinger`
+**Google Drive** stores large binary files that cannot go into git: sheet music
+PDFs, audio files (MP3, WAV), MIDI files, images, and video exports.
+See [docs/drive](docs/drive/README.md) for the Drive folder structure.
 
-## Skills + schemas
+**The rule:** if you can open it in a text editor and read it as plain text, it
+goes in this repository. If it is a PDF, audio file, image, or video, it goes on Drive.
 
-Design docs live under `.claude/`:
+### Project layout
 
-- `.claude/README.md` (overall pipeline + typical flows)
-- `.claude/skills/*/SKILL.md` (skill specs)
-- `.claude/schemas/` (JSON schemas for intermediate artifacts)
+```
+assets/          local working copies of Drive files (gitignored; sync from Drive)
+bin/             shell wrappers that invoke scripts/
+docs/            project documentation
+requirements/    pinned Python and tool dependencies
+scripts/         Python implementation of each pipeline stage
+tests/           automated tests
+third_party/     external tools (DiffSinger, etc.)
+.claude/         Claude skills, schemas, and pipeline design docs
+```
 
-## Portability manifests
+### Pipeline stages
 
-See `requirements/` for pinned snapshots of Python deps and external tools:
+```
+Sheet music (PDF/image)
+  → sheet2xml      scan with Audiveris → MusicXML
+  → arrange-score  arrange/restyle     → MusicXML
+  → xml2midi       export              → MIDI
+  → midi2music     render              → audio (WAV)
+  → [vocals]       DiffSinger + RVC    → vocal WAV
+  → mix_validate   mix + validate      → final WAV
+```
 
-- `requirements/requirements-python.txt`
-- `requirements/requirements-tools.txt`
-- `requirements/requirements.lock.md`
+### Requirements
 
+See `requirements/` for pinned snapshots of Python and tool dependencies.
+
+---
+
+## Working with Claude
+
+When Claude Code is launched from the project root, the contents of `.claude/`
+are automatically loaded into the session. This makes all project skills
+available as slash commands (e.g. `/arrange-score`, `/synthesize_vocal_with_diffsinger`).
+Always launch Claude from the project root, not from a subdirectory.
+
+Design docs under `.claude/`:
+
+- `.claude/README.md` — overall pipeline flows
+- `.claude/skills/*/SKILL.md` — per-stage skill specs
+- `.claude/schemas/` — JSON schemas for intermediate artifacts
+
+---
+
+## Documentation
+
+- [docs/drive](docs/drive/README.md) — Google Drive folder structure; where to find and put binary files
+- [docs/music](docs/music/README.md) — song catalog, arrangement experiments, and musical insights

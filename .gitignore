@@ -17,4 +17,5 @@ Desktop.ini
 .claude/settings.json
 assets/
 **/__pycache__/
-third_party/
+third_party/*
+!third_party/.gitkeep
