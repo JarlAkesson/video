@@ -1,3 +1,11 @@
+---
+name: mix-validate
+description: Use when a vocal stem and an arranged score are ready to combine into a final mix. Renders the instrumental, aligns vocal timing, mixes levels, exports final_song.wav, and emits mix_report.json with timing, level, and musical conflict warnings.
+allowed-tools: Read Bash Grep Glob Write
+argument-hint: [musicxml-file] [vocal-wav]
+effort: medium
+---
+
 # Skill 5: `mix_and_validate`
 
 ## Purpose

@@ -1,3 +1,11 @@
+---
+name: plan-vocals
+description: Use when music_analysis.json and lyrics.json are ready and syllables need to be aligned to melody notes to produce vocal_events.json for singing synthesis. This is the main LLM-assisted musical decision step.
+allowed-tools: Read Bash Grep Glob Write
+argument-hint: [music-analysis-json] [lyrics-json]
+effort: high
+---
+
 # Skill 3: `plan_and_align_vocals`
 
 ## Purpose

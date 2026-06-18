@@ -1,6 +1,6 @@
 ---
 name: xml2midi
-description: Convert MusicXML scores into MIDI using an open-source notation tool. Prefer MuseScore CLI; if unavailable, report the blocker and any viable open-source fallback.
+description: Use when a MusicXML score needs to be exported to MIDI for audio rendering or playback. Prefers MuseScore CLI; reports the blocker and any viable open-source fallback if unavailable.
 allowed-tools: Read Bash Grep Glob Write
 argument-hint: [musicxml-file-or-directory]
 effort: medium

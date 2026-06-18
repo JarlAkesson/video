@@ -1,6 +1,6 @@
 ---
 name: sheet2xml
-description: Convert sheet-music PDFs or images into MusicXML using an open-source OMR workflow. Prefer Audiveris for recognition, save outputs under assets/_build/xml/, and report recognition weaknesses that need manual cleanup.
+description: Use when sheet music in PDF or image format needs to be converted to MusicXML. Uses Audiveris for OMR recognition, saves outputs under assets/_build/xml/, and reports recognition weaknesses that need manual cleanup.
 allowed-tools: Read Bash Grep Glob Write
 argument-hint: [sheet-file-or-directory]
 effort: medium

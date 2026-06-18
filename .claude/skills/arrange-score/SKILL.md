@@ -1,6 +1,6 @@
 ---
 name: arrange-score
-description: Arrange a MusicXML score into a new editable MusicXML using user preferences such as vibe, added instruments, key, tempo, density, groove, bass, and drums. Use when the user wants to transform or augment an existing symbolic score while preserving score editability.
+description: Use when the user wants to transform or augment an existing symbolic score. Arranges MusicXML into a new styled score using preferences such as vibe, instruments, key, tempo, density, groove, bass, and drums while preserving score editability.
 allowed-tools: Read Bash Grep Glob Write
 argument-hint: [musicxml-or-mxl-file]
 effort: high

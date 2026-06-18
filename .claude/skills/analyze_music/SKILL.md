@@ -1,3 +1,11 @@
+---
+name: analyze-music
+description: Use when an arranged MusicXML score needs to be parsed into music_analysis.json — extracting tempo, meter, key, parts, phrases, melody candidates, and harmony — for downstream vocal planning. Does not read lyrics or alter the score.
+allowed-tools: Read Bash Grep Glob Write
+argument-hint: [musicxml-file]
+effort: medium
+---
+
 # Skill 1: `analyze_music`
 
 ## Purpose

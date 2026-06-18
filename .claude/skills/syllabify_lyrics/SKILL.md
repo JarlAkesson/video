@@ -1,3 +1,11 @@
+---
+name: syllabify-lyrics
+description: Use when lyrics.txt needs to be parsed and syllabified into lyrics.json for downstream vocal alignment. Respects explicit hyphens and applies a heuristic syllabifier. Does not inspect or modify the score.
+allowed-tools: Read Bash Grep Glob Write
+argument-hint: [lyrics-txt]
+effort: low
+---
+
 # Skill: `syllabify_lyrics`
 
 ## Purpose

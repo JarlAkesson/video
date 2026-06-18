@@ -1,6 +1,6 @@
 ---
 name: midi2music
-description: Render MIDI into audio using an open-source synthesizer stack. Prefer FluidSynth with a SoundFont; optionally convert WAV output to compressed formats with ffmpeg.
+description: Use when a MIDI file needs to be rendered into audio. Prefers FluidSynth with a SoundFont; optionally converts WAV to compressed formats with ffmpeg.
 allowed-tools: Read Bash Grep Glob Write
 argument-hint: [midi-file-or-directory]
 effort: medium

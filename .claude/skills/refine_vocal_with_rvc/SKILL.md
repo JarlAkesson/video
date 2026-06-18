@@ -1,3 +1,11 @@
+---
+name: refine-vocal-with-rvc
+description: Use when a rough DiffSinger vocal is ready and you want to optionally improve its timbre and naturalness using an RVC voice conversion model before mixing. This is a refinement step, not the core singing step.
+allowed-tools: Read Bash Grep Glob Write
+argument-hint: [rough-vocal-wav]
+effort: medium
+---
+
 # Skill 4: `refine_vocal_with_rvc`
 
 ## Purpose

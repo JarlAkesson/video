@@ -1,6 +1,6 @@
 ---
 name: download-scores
-description: Download music scores (sheet music, noter) for Swedish children's songs from a CSV file. Searches IMSLP, Musikverket, Internet Archive, MuseScore, and other sources. Saves downloads under assets/ with structured naming and produces a download report under assets/_build/.
+description: Use when sheet music or MIDI files need to be acquired for songs listed in a CSV catalog. Searches IMSLP, Musikverket, Internet Archive, MuseScore, and other sources. Saves downloads under assets/ with structured naming.
 allowed-tools: Read Bash Grep Glob Write WebSearch WebFetch Agent TodoWrite
 argument-hint: [csv-file]
 effort: max

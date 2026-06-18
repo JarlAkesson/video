@@ -1,3 +1,11 @@
+---
+name: synthesize-vocal-with-diffsinger
+description: Use when vocal_events.json is ready and a sung vocal WAV needs to be generated via a DiffSinger backend. Handles phonemization and produces rough_vocal.wav. Prefers the vendored Nishiren DiffSinger v2.0 ONNX voicebank.
+allowed-tools: Read Bash Grep Glob Write
+argument-hint: [vocal-events-json]
+effort: high
+---
+
 # Skill 3: `synthesize_vocal_with_diffsinger`
 
 ## Purpose
