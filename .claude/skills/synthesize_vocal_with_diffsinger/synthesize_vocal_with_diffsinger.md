@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Convert `vocal_events.json` into the input format expected by the chosen singing backend, then run inference to produce `rough_vocal.wav`.
+Convert `vocal_events.json` into the input format expected by the chosen DiffSinger checkpoint/fork, then call DiffSinger inference to produce `rough_vocal.wav`.
 
 This skill combines backend-specific input generation and rendering.
 
@@ -37,30 +37,7 @@ For English, possible tools:
 - `pronouncing`
 - fallback LLM correction for sung pronunciation
 
-### Nishiren DiffSinger v2.0 (preferred in this repo)
-
-This repo vendors a self-contained ONNX voicebank under:
-
-```text
-third_party/Nishiren Diffsinger v2.0/
-```
-
-Use it via:
-
-```bash
-./bin/synthesize_vocal_with_diffsinger vocal_events.json \
-  --backend nishiren_onnx \
-  --nishiren-root "third_party/Nishiren Diffsinger v2.0" \
-  --nishiren-lang en \
-  --nishiren-style Standard \
-  --out rough_vocal.wav \
-  --debug-out diffsinger_input.json \
-  --log synthesis_log.json
-```
-
-This backend requires real phonemes; in the current implementation it uses a minimal built-in lexicon for the Old MacDonald demo and should be extended (or replaced by a real G2P) for general lyrics.
-
-### DiffSinger (OpenVPI-style)
+### DiffSinger
 
 Use a DiffSinger inference script/checkpoint. DiffSinger is score-conditioned; practical inference inputs usually include text/phoneme sequence, note sequence, note durations, and slur flags.
 
@@ -120,7 +97,7 @@ synthesis_log.json
 ## Suggested CLI
 
 ```bash
-./bin/synthesize_vocal_with_diffsinger vocal_events.json \
+synthesize_vocal_with_diffsinger vocal_events.json \
   --model models/diffsinger/singer_a \
   --language English \
   --out rough_vocal.wav \

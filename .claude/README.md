@@ -107,7 +107,7 @@ Python extracts, converts, validates, and renders.
 Audiveris recognizes.
 MuseScore exports.
 FluidSynth renders.
-DiffSinger sings.
+Nishiren DiffSinger v2.0 sings.
 RVC optionally polishes.
 Mixer assembles and validates.
 ```

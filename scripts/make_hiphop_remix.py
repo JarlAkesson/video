@@ -157,6 +157,48 @@ def scale_tempos(root, factor):
         sound.set("tempo", f"{value * factor:.4f}".rstrip("0").rstrip("."))
 
 
+def remove_existing_tempos(measure):
+    for direction in list(measure.findall("direction")):
+        direction_type = direction.find("direction-type")
+        sound = direction.find("sound")
+        has_metronome = direction_type is not None and direction_type.find("metronome") is not None
+        has_tempo = sound is not None and sound.get("tempo") is not None
+        if has_metronome or has_tempo:
+            measure.remove(direction)
+
+
+def tempo_factor_for_measure(measure_index):
+    cycle8 = (measure_index - 1) % 8
+    if measure_index <= 8:
+        return [0.84, 1.18, 0.92, 1.09, 0.88, 1.16, 0.94, 1.04][cycle8]
+    if measure_index <= 24:
+        return [1.02, 0.93, 1.11, 0.9, 1.0, 1.14, 0.95, 1.06][cycle8]
+    if measure_index <= 40:
+        return [1.17, 0.96, 1.22, 0.91, 1.12, 1.25, 0.98, 1.08][cycle8]
+    if measure_index <= 56:
+        return [1.24, 1.0, 1.18, 0.89, 1.28, 0.95, 1.14, 1.05][cycle8]
+    return [0.9, 1.08, 1.2, 0.86, 1.26, 0.98, 1.16, 1.32][cycle8]
+
+
+def apply_staggered_tempos(root, base_tempo):
+    first_part = root.find("part")
+    if first_part is None:
+        return
+
+    for measure_index, measure in enumerate(first_part.findall("measure"), start=1):
+        remove_existing_tempos(measure)
+        tempo_value = base_tempo * tempo_factor_for_measure(measure_index)
+
+        direction = ET.Element("direction", {"placement": "above"})
+        direction_type = ET.SubElement(direction, "direction-type")
+        metronome = ET.SubElement(direction_type, "metronome")
+        ET.SubElement(metronome, "beat-unit").text = "quarter"
+        ET.SubElement(metronome, "per-minute").text = f"{tempo_value:.3f}".rstrip("0").rstrip(".")
+        sound = ET.SubElement(direction, "sound")
+        sound.set("tempo", f"{tempo_value:.4f}".rstrip("0").rstrip("."))
+        measure.insert(0, direction)
+
+
 def extract_staff_events(measure, staff_number):
     events = []
     time_pos = 0
@@ -315,23 +357,25 @@ def drum_pattern(segment, measure_index):
     cycle8 = (measure_index - 1) % 8
     cycle4 = (measure_index - 1) % 4
     if segment == "intro":
-        return []
+        if cycle4 in {0, 2}:
+            return [(0, "subkick"), (21, "hat"), (24, "clap"), (33, "hat"), (42, "kick")]
+        return [(0, "subkick"), (12, "hat"), (24, "clap"), (30, "hat"), (39, "kick"), (45, "hat")]
     if segment == "shadow":
         if cycle4 == 1:
-            return [(0, "subkick"), (24, "clap"), (30, "kick"), (42, "hat")]
-        return [(0, "subkick"), (18, "kick"), (24, "clap"), (42, "hat")]
+            return [(0, "subkick"), (12, "hat"), (18, "kick"), (24, "clap"), (27, "hat"), (33, "hat"), (39, "kick"), (45, "hat")]
+        return [(0, "subkick"), (9, "hat"), (18, "kick"), (24, "clap"), (30, "hat"), (36, "kick"), (42, "hat"), (45, "kick")]
     if segment == "swagger":
         if cycle8 in {3, 7}:
-            return [(0, "subkick"), (9, "hat"), (18, "kick"), (24, "clap"), (33, "hat"), (39, "kick"), (45, "tom")]
-        return [(0, "subkick"), (9, "hat"), (18, "kick"), (24, "clap"), (39, "kick")]
+            return [(0, "subkick"), (6, "hat"), (9, "hat"), (15, "kick"), (18, "hat"), (24, "clap"), (27, "kick"), (33, "hat"), (36, "kick"), (39, "hat"), (42, "tom"), (45, "subkick")]
+        return [(0, "subkick"), (6, "hat"), (12, "kick"), (18, "hat"), (24, "clap"), (30, "hat"), (33, "kick"), (39, "hat"), (42, "kick"), (45, "hat")]
     if segment == "drive":
         if cycle4 == 3:
-            return [(0, "subkick"), (9, "hat"), (15, "kick"), (24, "clap"), (30, "kick"), (39, "hat"), (45, "tom")]
-        return [(0, "subkick"), (12, "hat"), (18, "kick"), (24, "clap"), (39, "kick"), (45, "kick")]
+            return [(0, "subkick"), (6, "hat"), (12, "kick"), (15, "hat"), (18, "kick"), (24, "clap"), (27, "hat"), (30, "kick"), (36, "hat"), (39, "kick"), (42, "tom"), (45, "subkick")]
+        return [(0, "subkick"), (6, "hat"), (12, "kick"), (18, "hat"), (21, "kick"), (24, "clap"), (30, "hat"), (36, "kick"), (39, "hat"), (42, "kick"), (45, "subkick")]
     # finale
     if cycle8 in {6, 7}:
-        return [(0, "subkick"), (9, "hat"), (18, "kick"), (24, "clap"), (30, "kick"), (39, "hat"), (42, "tom"), (45, "subkick")]
-    return [(0, "subkick"), (12, "hat"), (18, "kick"), (24, "clap"), (33, "hat"), (39, "kick"), (45, "subkick")]
+        return [(0, "subkick"), (6, "hat"), (9, "kick"), (15, "hat"), (18, "kick"), (24, "clap"), (27, "kick"), (30, "hat"), (36, "kick"), (39, "hat"), (42, "tom"), (45, "subkick")]
+    return [(0, "subkick"), (6, "hat"), (12, "kick"), (18, "hat"), (24, "clap"), (27, "kick"), (30, "hat"), (36, "kick"), (39, "hat"), (42, "kick"), (45, "subkick")]
 
 
 def add_bass_part(root, piano_part, part_list):
@@ -442,7 +486,8 @@ def main():
         raise ValueError("Expected piano+violin arranged score as input")
 
     transpose_existing_parts(root, semitones=-2, new_fifths=-4)
-    scale_tempos(root, factor=0.85)
+    scale_tempos(root, factor=1.02)
+    apply_staggered_tempos(root, base_tempo=92.0)
     piano_part = root.findall("part")[0]
     add_bass_part(root, piano_part, part_list)
     add_drum_part(root, piano_part, part_list)

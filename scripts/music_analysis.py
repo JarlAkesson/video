@@ -21,7 +21,7 @@ def _pitch_name_range(pitches) -> list[str]:
 def _density_score(part) -> float:
     total = 0.0
     sounded = 0.0
-    for el in part.flat.notesAndRests:
+    for el in part.flatten().notesAndRests:
         ql = float(el.quarterLength)
         total += ql
         if el.isNote or el.isChord:
@@ -101,7 +101,7 @@ def analyze_score(score, tempo_bpm_override: float | None = None) -> tuple[dict,
         pitches = []
         midi_vals = []
         note_count = 0
-        for n in part.flat.notes:
+        for n in part.flatten().notes:
             if n.isChord:
                 for p in n.pitches:
                     pitches.append(p)
@@ -190,4 +190,3 @@ def analyze_score(score, tempo_bpm_override: float | None = None) -> tuple[dict,
         "melody_candidates": melody_candidates,
     }
     return score_dict, warnings
-
