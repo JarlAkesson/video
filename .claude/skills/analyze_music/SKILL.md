@@ -53,6 +53,8 @@ Use `music21` to:
 4. Identify melody candidates.
 5. Estimate phrase boundaries.
 6. Infer harmonic context, preferably as chord symbols or roman numerals.
+   - Respect standard functional root motion: tonic → predominant → dominant → tonic.
+   - Never resolve a dominant chord (V, vii°) directly to a predominant chord (ii, IV). A dominant should move to tonic (or, if prolonged, to another dominant-function chord); if a predominant sonority is needed after it, treat the intervening melody notes as passing/neighbor tones over the surrounding chord instead of introducing a new predominant harmony.
 7. Emit `music_analysis.json`.
 
 ## Output
