@@ -49,6 +49,7 @@ Use `music21` to:
 
 1. Parse the score.
 2. Extract global metadata: tempo, meter, key, measure count.
+   - Don't trust the written barlines by default. If the melody opens with a short note or repeated pair of identical short notes (lighter-weight than what follows) leading into a longer, more stable note, treat that as a possible mis-notated anacrusis (upbeat) rather than a downbeat. Cross-check the hypothesis against the harmonic reading (step 6): re-derive the harmony under both the literal barring and the shifted-by-the-pickup barring, and prefer whichever produces the more idiomatic result — chord tones landing on strong beats instead of weak ones, fewer forced mid-measure splits, and cadences/climaxes resolving onto harmonically logical chords (tonic, dominant) rather than requiring an odd substitute.
 3. Extract part-level metadata: instrument names, ranges, density, likely role.
 4. Identify melody candidates.
 5. Estimate phrase boundaries.
