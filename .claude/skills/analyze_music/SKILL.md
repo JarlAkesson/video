@@ -54,6 +54,7 @@ Use `music21` to:
 3. Extract part-level metadata: instrument names, ranges, density, likely role.
 4. Identify melody candidates.
 5. Estimate phrase boundaries.
+   - Determine phrase boundaries from the melody's own signals first — rests, matching rhythmic/motivic units, repeated contours — independently of the harmonic analysis in step 6. Don't let wherever a chord happens to resolve dictate where a phrase ends: if the harmony doesn't fit neatly into melody-defined boundaries, it's the harmony that needs revisiting (e.g. keeping tonic through a boundary a dominant would otherwise cross), not the phrase grouping. A dominant crossing a clear, melody-defined boundary is only acceptable as a rare, well-motivated exception — typically because the melody leaves no other way to harmonize the note there — not a default reason to redraw the phrases around it.
 6. Infer harmonic context, preferably as chord symbols or roman numerals.
    - Respect standard functional root motion: tonic → predominant → dominant → tonic.
    - Never resolve a dominant chord (V, vii°) directly to a predominant chord (ii, IV). A dominant should move to tonic (or, if prolonged, to another dominant-function chord); if a predominant sonority is needed after it, treat the intervening melody notes as passing/neighbor tones over the surrounding chord instead of introducing a new predominant harmony.
