@@ -70,6 +70,12 @@ Use `music21` to:
    - After harmonizing measure by measure, zoom out and check the cadential shape of the whole piece. A piece with no V chord anywhere is a red flag, even if every individual measure's chord looked well-justified in isolation — measure-level correctness doesn't guarantee a purposeful, arc-shaped harmonic structure overall. It is very important that a piece has a purposeful, arc-shaped harmonic structure. Reserve full plagal treatment for the places that genuinely don't support V, rather than letting it become the piece's only cadence type by default.
 7. Emit `music_analysis.json`.
 
+## Color and variation
+
+The bullets under step 6 above cover the functionally-required reading of the melody — the chords that are actually implied. Once that reading is solid, it's also worth noting optional color/variation choices that go beyond strict function, especially on a repeated phrase where a small harmonic twist keeps the repeat from feeling like a flat copy. These are enrichments layered on top of the functional analysis, not something the bare melody demands, so surface them separately (e.g. as a note/warning) rather than folding them into `chord_guess` as if they were required.
+
+- When a stable chord (often the tonic) sits right before a plain diatonic move that has no connective pull between the two chords, consider coloring the departing chord with an added 7th so it functions as an applied/secondary dominant of what follows. The added tone should resolve down a half step onto a chord tone the melody is already heading toward (often the root or 5th of the next chord) — that gives the progression a directed pull instead of two chords just sitting next to each other. This works especially well on the second pass of a repeated phrase, where the first statement can stay on the plain, functionally-clear chord and the repeat gets the extra color.
+
 ## Output
 
 Write `music_analysis.json` matching `schemas/music_analysis.schema.json`.
