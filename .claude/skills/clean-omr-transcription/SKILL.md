@@ -196,7 +196,116 @@ wrong Voice part" or "note pitch is simply wrong." Before reporting success:
    processed file per song — a large unexplained delta (either direction) is
    a red flag worth investigating before trusting the result.
 
-## 9. Practical process notes
+## 9. File naming convention
+
+Once a book's songs are cleaned and finalized, rename each per-song deliverable
+to a stable, sortable convention rather than leaving Audiveris's source-derived
+names (`song_NN_sheets_X_v6.musicxml`) in place:
+
+```
+{BOOK_ABBR}_{book_number}_{song_number:02d}_{slug}_v{version}.musicxml
+```
+
+- `BOOK_ABBR`: initials of the book title (e.g. `SMOM` for "Sjung med oss,
+  mamma!"), decided once per songbook series and reused across all of its
+  volumes.
+- `book_number`: the volume number within the series (`1`, `2`, `3`, ...).
+- `song_number`: two-digit, zero-padded, reflecting the song's **order of
+  appearance in the book** — not any OMR sheet/page numbering.
+- `slug`: the song title, lowercased and slugified — strip any leading
+  `"N. "` numbering prefix from the title first, then
+  `unicodedata.normalize('NFKD', title)` → ascii-encode (drop non-ascii,
+  e.g. accented Swedish letters) → lowercase → replace runs of non-alphanumeric
+  characters with `_` → strip leading/trailing `_`.
+- `version`: the pipeline-version counter for that song. When a naming
+  convention is introduced or changed, treat it as a fresh start and restart
+  numbering at `v1` for every song rather than trying to preserve old version
+  numbers across the rename.
+
+Example: `SMOM_1_01_julafton_v1.musicxml`.
+
+**Only rename the individual per-song files.** Leave any combined whole-book
+deliverable (e.g. `Alice_Tegner_Sjung_med_oss_mamma_{N}_combined.musicxml` /
+`.mscz`) under its existing name — this is a deliberate, explicit choice
+(confirmed with the user rather than assumed), since the combined file is
+typically referenced by that name elsewhere and doesn't benefit from
+per-song ordering metadata.
+
+When applying (or re-applying) this rename after a pipeline re-run: the
+per-song output filenames on disk always come from the *raw source* filename
+(e.g. `song_02_sheets_5.mxl` → `song_02_sheets_5_v6.musicxml`), not from the
+previous rename — so if the pipeline runs again, delete stale renamed files
+first (or regenerate the mapping fresh from the script's `SONGS` list) rather
+than assuming yesterday's `SMOM_*` names will just get overwritten in place.
+
+## 10. Cross-part measure-number gaps — a root cause of severe combined-score corruption
+
+Beyond simple measure-*count* mismatches (covered by re-syncing counts), watch
+for a subtler and more dangerous OMR artifact: one part's measures are
+numbered with a **gap relative to another part**, e.g. Melody has measures
+`1..9` but the Piano part (Audiveris misdetected/mislabeled a pickup bar) has
+measures `2..10` — same *count* (9), but the wrong numbers, with the
+implied content shifted by one position.
+
+- Fixing this by only checking `len(measures)` and padding a rest measure
+  **at the end** is wrong and dangerous: it hides the count mismatch while
+  leaving the actual position of every subsequent measure silently shifted
+  by one. When per-song scores are later appended positionally into a
+  combined book-length score, this shift compounds across every remaining
+  song and can balloon into gross corruption (observed: a piano PartStaff
+  correctly at 301 measures ballooning to 418 after assembly+write, because
+  one mid-book song's gap desynced everything appended after it).
+- The correct fix: use one part's actual measure **numbers** as the reference
+  sequence (pick the part with the most measures), find which numbers are
+  *missing* from each other part, and insert rest-padding measures at the
+  correct ordinal position in that sequence — not always at the end.
+- This class of bug is easy to miss because each individual per-song file
+  still looks locally consistent (`[9, 9, 9]` measures across parts) — the
+  corruption only becomes visible after combining many songs together, so
+  don't treat "per-song counts match" as sufficient proof of correctness;
+  always also verify the final combined score's per-part measure counts
+  match exactly.
+
+## 11. music21's MusicXML writer is not idempotent — guard the final write, don't just loop it
+
+Re-parsing and rewriting an already-written file is not a safe way to "clean
+up" residual issues — music21's own MusicXML export step can itself
+introduce corruption that wasn't present in the verified-clean in-memory
+score, in at least two distinct ways:
+
+- **Spurious empty/extra voice**: a measure that was verified to have ≤2 real
+  voices immediately before `.write()` can come back with an extra
+  rest-only voice when the just-written file is re-parsed.
+- **Measure-count inflation**: a grand-staff `PartStaff` part can silently
+  gain far more measures than its sibling parts on write (observed: 301 →
+  418), with music21 raising no error at all.
+
+Both are non-deterministic in the sense that they don't reproduce from every
+input, but for a given score+write they are **deterministic** — repeatedly
+re-parsing and rewriting the *same already-corrupted file* does not
+reliably converge, and can make measure-count inflation worse, not better,
+since each rewrite operates on an already-inflated input.
+
+The robust pattern:
+1. Do all cleanup on the **original in-memory score** before ever writing.
+2. Write once, then re-parse the result and check both (a) voice violations
+   and (b) that every part's measure count matches the in-memory reference
+   counts taken before the write.
+3. If check (b) fails (measure-count mismatch), retry by writing the
+   **original in-memory score again from scratch** — never from the
+   corrupted file — since only a fresh write has a chance of not hitting
+   the same inflation path. Cap retries (e.g. 5 attempts) and warn if it
+   never converges.
+4. If only check (a) fails (voice violations, counts otherwise consistent),
+   it's then safe to re-parse the written file, clean voices in place, and
+   do one final rewrite — this residual case is a much smaller, more
+   localized defect than a full measure-count desync.
+5. Accept that a small number of measures may resist even this and require
+   a manual fix in a notation editor (e.g. MuseScore GUI: select the stray
+   empty voice's rest and remove it) — confirm this tradeoff with the user
+   rather than silently shipping a corrupted file or looping indefinitely.
+
+## 12. Practical process notes
 
 - When re-exporting individual songs from a completed Audiveris `.omr`
   checkpoint via `-sheets N-M`, check for **both** `<bookname>.mxl` and
