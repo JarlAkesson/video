@@ -1,24 +1,26 @@
 ---
 name: analyze-music
-description: Use when an arranged MusicXML score needs to be parsed into music_analysis.json — extracting tempo, meter, key, parts, phrases, melody candidates, and harmony — for downstream vocal planning. Does not read lyrics or alter the score.
+description: Use when a score's basic_analysis.json (from the basic_analysis skill) is ready and needs its harmonic layer inferred, producing the final music_analysis.json — chord symbols or roman numerals per measure/beat — for downstream vocal planning. Does not read lyrics or alter the score.
 allowed-tools: Read Bash Grep Glob Write
-argument-hint: [musicxml-file]
+argument-hint: [basic-analysis-json]
 effort: medium
 ---
 
-# Skill 1: `analyze_music`
+# Skill 2: `analyze_music`
 
 ## Purpose
 
-Turn `arranged_music.xml` into a compact musical representation that an LLM can reason over without reading raw MusicXML.
+Take `basic_analysis.json` (produced by the `basic_analysis` skill: tempo, meter, key, measure count, parts, phrases, melody candidates) and infer its harmonic layer, emitting the complete `music_analysis.json` that an LLM can reason over without reading raw MusicXML.
 
-This skill is music-analysis-only. It should not read lyrics and should not alter the score.
+This skill is harmonic-analysis-only. It should not read lyrics and should not alter the score. It depends on `basic_analysis` having already run; if `basic_analysis.json` isn't available, run that skill first.
 
 ## Inputs
 
 ```text
-arranged_music.xml
+basic_analysis.json
 ```
+
+(and the original `arranged_music.xml`, for direct note/beat access when computing harmony)
 
 Optional config:
 
@@ -37,25 +39,12 @@ Optional config:
 Use `music21` to:
 
 - parse MusicXML
-- list parts and instruments
 - extract measures, notes, rests, voices, and durations
-- infer key and meter
-- read tempo markings
 - chordify the arrangement to infer harmonic context
-- find candidate melody lines
-- compute ranges and singability features
 
 ## Core responsibilities
 
-1. Parse the score.
-2. Extract global metadata: tempo, meter, key, measure count.
-   - Don't trust the written barlines by default. Explicitly check the actual note-duration pattern at the start of the piece against the anacrusis shape every time — a short note or repeated pair of identical short notes (lighter-weight than what follows, or marked staccato) leading into a longer, more stable note — and treat a match as a possible mis-notated anacrusis (upbeat) rather than a downbeat. Do this check regardless of whether the opening measure contains a rest: a rest is one way an anacrusis gets mis-notated, but a measure that is already rhythmically "full" (no rest, adds up to the full bar) is just as capable of opening with this short-into-long shape, and its being metrically complete is not evidence the barline is already correct. Cross-check the hypothesis against the harmonic reading (step 6): re-derive the harmony under both the literal barring and the shifted-by-the-pickup barring, and prefer whichever produces the more idiomatic result — chord tones landing on strong beats instead of weak ones, fewer forced mid-measure splits, and cadences/climaxes resolving onto harmonically logical chords (tonic, dominant) rather than requiring an odd substitute. If the melody contains a chromatic/leading-tone accidental, this is a decisive test: prefer the barring in which that note resolves forward onto the following downbeat, not one that strands it mid-measure after its resolution has already happened.
-   - The piece's very first upbeat does not get its own measure number, even when it's a genuine, correctly-notated pickup (e.g. filled out with rests before it). Measure numbering starts at 1 with the first full measure; refer to the opening anacrusis separately (as the pickup/upbeat).
-3. Extract part-level metadata: instrument names, ranges, density, likely role.
-4. Identify melody candidates.
-5. Estimate phrase boundaries.
-   - Determine phrase boundaries from the melody's own signals first — rests, matching rhythmic/motivic units, repeated contours — independently of the harmonic analysis in step 6. Don't let wherever a chord happens to resolve dictate where a phrase ends: if the harmony doesn't fit neatly into melody-defined boundaries, it's the harmony that needs revisiting (e.g. keeping tonic through a boundary a dominant would otherwise cross), not the phrase grouping. A dominant crossing a clear, melody-defined boundary is only acceptable as a rare, well-motivated exception — typically because the melody leaves no other way to harmonize the note there — not a default reason to redraw the phrases around it.
-6. Infer harmonic context, preferably as chord symbols or roman numerals.
+1. Infer harmonic context, preferably as chord symbols or roman numerals.
    - Respect standard functional root motion: tonic (I) → predominant (ii/IV) → dominant (V/vii°) → tonic.
 
    **Dominant function**
@@ -97,7 +86,7 @@ Use `music21` to:
    - After harmonizing measure by measure, zoom out and check the cadential shape of the whole piece. A piece with no V chord anywhere is a red flag, even if every individual measure's chord looked well-justified in isolation — measure-level correctness doesn't guarantee a purposeful, arc-shaped harmonic structure overall. It is very important that a piece has a purposeful, arc-shaped harmonic structure. Reserve full plagal treatment for the places that genuinely don't support V, rather than letting it become the piece's only cadence type by default.
    - Give special scrutiny to the piece's actual final measure(s): if they read as a static tonic with some note explained away as a passing/neighbor decoration, check whether that "decorative" note is actually a genuine tone of V (most often its 5th) instead. If so, prefer the real V-I authentic cadence there — even if it lands the chord change on an unusual beat (e.g. beat 4, not just 1 or 3) — over ending the piece on an unsupported tonic pedal.
    - Before finalizing, check every carried-over chord (one simply continued from the previous measure, not freshly derived from its own notes) using the Bash tool with music21 rather than eyeballing it — carried-over chords are exactly where mistakes hide, since nothing prompted a fresh look. Confirm each strong-beat melody note is a genuine tone of that chord or resolves by step into one on the next note; a note that is neither is a hard sign the chord is wrong for that measure.
-7. Emit `music_analysis.json`.
+2. Emit `music_analysis.json`.
 
 ## Melodic improvement suggestions
 
@@ -174,16 +163,15 @@ The next skill needs to decide where and how to sing. It needs compact facts:
 ## Suggested CLI
 
 ```bash
-./bin/analyze_music arranged_music.xml --out music_analysis.json
+./bin/analyze_music basic_analysis.json --out music_analysis.json
 ```
 
 ## Failure modes
 
 Return a nonzero exit code and diagnostic JSON if:
 
-- MusicXML cannot be parsed
-- no usable note material is found
+- `basic_analysis.json` is missing or doesn't validate
+- the underlying MusicXML cannot be re-read for note/beat access
 - lyrics are empty
-- tempo cannot be determined and no default is supplied
 
-If key, chords, or phrases are uncertain, emit warnings instead of failing.
+If chords are uncertain, emit warnings instead of failing.
