@@ -94,10 +94,6 @@ Use `music21` to:
    - Before finalizing, check every carried-over chord (one simply continued from the previous measure, not freshly derived from its own notes) using the Bash tool with music21 rather than eyeballing it — carried-over chords are exactly where mistakes hide, since nothing prompted a fresh look. Confirm each strong-beat melody note is a genuine tone of that chord or resolves by step into one on the next note; a note that is neither is a hard sign the chord is wrong for that measure.
 2. Emit `music_analysis.json`.
 
-## Melodic improvement suggestions
-
-Occasionally the melody as received seems to contain a genuine pitch mistake — not a hard-to-harmonize note, but one that blocks a clean harmonic structure no matter how it's approached. Only ever question a note's pitch, never its rhythm/duration; a full-blown reinterpretation is out of scope here. Only flag one when both hold: (1) it's causing a real structural problem, not routine dissonance — e.g. a phrase that can't cadence where a phrase of that length clearly should, or the one note breaking an otherwise-exact repeated phrase — and (2) a small stepwise correction (up or down by a single scale step) resolves it cleanly, landing the note on a chord tone that fits the surrounding harmony the way the rest of the phrase does. State the original pitch, the correction, and the specific structural problem it fixes; leave the source score untouched and apply the fix only within this analysis, noting it as a warning.
-
 ## Output
 
 Write `music_analysis.json` matching `schemas/music_analysis.schema.json`.
