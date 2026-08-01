@@ -1,50 +1,52 @@
 ---
 name: analyze-music
-description: Use when a score's basic_analysis.json (from the basic_analysis skill) is ready and needs its harmonic layer inferred, producing the final music_analysis.json — chord symbols or roman numerals per measure/beat — for downstream vocal planning. Does not read lyrics or alter the score.
+description: Use when a score needs parsing into music_analysis.json — tempo, meter, key, anacrusis, phrases, and inferred harmony as chord symbols or roman numerals per measure/beat — for downstream vocal planning. Does not read lyrics or alter the score.
 allowed-tools: Read Bash Grep Glob Write
-argument-hint: [basic-analysis-json]
+argument-hint: [score-file]
 effort: medium
 ---
 
-# Skill 2: `analyze_music`
+# Skill: `analyze_music`
 
 ## Purpose
 
-Take `basic_analysis.json` (produced by the `basic_analysis` skill: tempo, meter, key, measure count, parts, phrases, melody candidates) and infer its harmonic layer, emitting the complete `music_analysis.json` that an LLM can reason over without reading raw MusicXML.
+Turn a score into `music_analysis.json`: its structural facts (tempo, meter, key, barring, phrases) and its inferred harmonic layer, in a form an LLM can reason over without reading raw MusicXML.
 
-This skill is harmonic-analysis-only. It should not read lyrics and should not alter the score. It depends on `basic_analysis` having already run; if `basic_analysis.json` isn't available, run that skill first.
+This skill should not read lyrics and should not alter the score.
 
 ## Inputs
 
 ```text
-basic_analysis.json
+a score file readable by music21 (.musicxml, .mxl, .mid)
 ```
 
-(and the original `arranged_music.xml`, for direct note/beat access when computing harmony)
-
-Optional config:
-
-```json
-{
-  "preferred_vocal_range": ["C4", "A5"],
-  "target_style": "gentle children's song",
-  "language_hint": "English"
-}
-```
+Whatever score is handed in is the melody to be sung — there is no melody to select or identify, so nothing here or downstream needs to record which line carries the tune.
 
 ## Tools
 
+### `scripts/extract_basic_metadata.py`
+
+Run this first, always — it's a deterministic music21 script, not something to re-derive by reading or reasoning:
+
+```bash
+python3 .claude/skills/analyze_music/scripts/extract_basic_metadata.py <path-to-score>
+```
+
+Prints `tempo_bpm`, `meter`, `measure_count`, and per-part `name`, `range`, `note_count` as JSON. Only the first three are emitted in the output. These are purely mechanical extractions with no musical judgment in them, so deriving them by reasoning is wasted token spend — this script is the only source for them. Two caveats: it reports only the *first* time signature, so check the score directly for mid-piece meter changes; and if an anacrusis correction shifts the barring, recompute `measure_count` from the corrected barring rather than trusting its raw count.
+
 ### music21
 
-Use `music21` to:
-
-- parse MusicXML
-- extract measures, notes, rests, voices, and durations
-- chordify the arrangement to infer harmonic context
+For everything the script doesn't cover, use `music21` directly to inspect measures, notes, rests, durations, and offsets — for the key and anacrusis checks, for phrase boundaries, and for computing harmony.
 
 ## Core responsibilities
 
-1. Infer harmonic context, preferably as chord symbols or roman numerals.
+1. Parse the score and run `scripts/extract_basic_metadata.py` for tempo, meter, and measure count.
+2. Determine the key, and check for a mis-notated anacrusis. **Settle both before harmonizing, and record each as its own warning stating the evidence** — these two decisions govern every chord that follows, and burying them inside the harmonic reasoning is how they go wrong unnoticed.
+   - Never take the key from the key signature alone: it is ambiguous between relative major and minor, and a modulation between relatives does not change it. Decide from where the melody actually rests and resolves — above all the true final note — plus whether a raised leading tone appears and resolves up by a verified half step, and whether the opening outlines the candidate tonic triad.
+   - Don't trust the written barlines by default. Explicitly check the note-duration pattern at the start of the piece against the anacrusis shape every time — a short note, or a repeated pair of identical short notes, lighter than what follows, leading into a longer more stable note — and treat a match as a possible mis-notated anacrusis rather than a downbeat. Do this regardless of whether the opening measure contains a rest: a rest is one way an anacrusis gets mis-notated, but a metrically complete measure is just as capable of opening with that shape, and its being full is not evidence the barline is right. Cross-check against the harmony: re-derive under both the literal barring and the shifted one, and prefer whichever puts chord tones on strong beats, forces fewer mid-measure splits, and lands cadences on tonic or dominant rather than an odd substitute. A chromatic or leading-tone accidental is decisive — prefer the barring in which it resolves forward onto the following downbeat instead of being stranded mid-measure. Confirm a pickup arithmetically where possible: its duration plus the final measure's should complete one full bar. If an anacrusis is confirmed, recompute `measure_count`.
+   - The piece's very first upbeat gets no measure number of its own, even when correctly notated (e.g. filled out with rests). Numbering starts at 1 with the first full measure; refer to the opening anacrusis separately as the pickup.
+3. Estimate phrase boundaries from the melody's own signals — rests, matching rhythmic and motivic units, repeated contours — independently of the harmony. Don't let a chord's resolution point dictate where a phrase ends: if the harmony doesn't fit the melody-defined boundaries, it's the harmony that needs revisiting.
+4. Infer harmonic context, preferably as chord symbols or roman numerals.
    - Respect standard functional root motion: tonic (I) → predominant (ii/IV) → dominant (V/vii°) → tonic.
 
    **Dominant function**
@@ -71,7 +73,6 @@ Use `music21` to:
    - Land chord changes on strong beats — beat 1 or 3 in 4/4 and 3/4 — over weak or fractional positions, even if that means reading the on-beat note as a suspension or appoggiatura resolving to the real chord tone right after: check whether the chord can still land right on the strong beat this way before delaying its arrival to a weaker beat. This applies with particular force at a phrase's own cadential resolution — don't let the arrival chord be the one exception that lands late just because delaying it looks cleaner in isolation.
    - Keep the harmonic rhythm regular (e.g. one chord change per measure, landing on the downbeat) rather than letting chord changes fall at irregular, arbitrary points mid-measure, or worse, mid-beat. Reserve mid-measure chord changes for deliberate, consistently-placed harmonic acceleration into a cadence (e.g. splitting the measure right before a cadential resolution), not as a default way to accommodate every melody note.
    - "Regular" is judged by position within the phrase, not per measure: mid-measure splits belong in a phrase's cadential second half, with its first half held one chord per measure. An alternation that recurs at the same phrase position throughout is regular by definition — don't flag it as uneven, and don't flatten it to one chord per measure for uniformity's sake. Before finalizing, line the phrases up and compare slot by slot; the real irregularity is a split appearing in one phrase's slot but not in the matching slot of its parallel phrases, or the same melodic figure split in one place and held in another.
-   - "Regular" doesn't mean slow: in lively, dance-style tunes, default to a faster, evenly-spaced harmonic rhythm (roughly one chord per strong beat) over long static pedal points, even where a single sustained chord would technically work. Weigh the richest well-supported progression against the sparsest one that merely fits, and favor the richer one for this kind of material — fewest chords is a tiebreaker, not the goal.
    - In a piece that's otherwise one-chord-per-measure (or one-per-strong-beat), be suspicious of a chord that runs longer than a measure but splits off at a beat other than the next downbeat (e.g. bleeding from measure 2 into the first half of measure 3) — this is usually a sign a cleaner reading exists. Check whether extending the following chord (e.g. adding a 9th) lets it cover the whole measure on its own instead of starting mid measure.
    - When the note sitting on a strong beat is a tone shared by both the outgoing and incoming chord (e.g. a note that's the dominant's root and also the tonic's 5th), don't default to reading it as the outgoing chord held over. Check whether assigning it to the incoming chord instead lands the resolution right on that strong beat — if so, prefer that reading. Weigh this with extra force once a consistent per-measure rhythm is already established nearby (e.g. a change on beat 3 in the surrounding measures): extend that same rhythm to the ambiguous measure by default, rather than letting a shared tone become an excuse to hold one chord longer than its neighbors.
    - Before explaining a strong-beat note as a departure/passing tone to keep the chord held, check whether it's instead a direct, undecorated fit for a different chord — and prefer that reading when it also fits the established harmonic rhythm (e.g. lines up with a beat-3 change already used nearby), even if the departure reading technically verifies too. A common specific case: a held note that looks like a 2-1 suspension resolving down to the tonic root is often actually V's own 5th resolving to I — check this before defaulting to the suspension reading.
@@ -86,17 +87,21 @@ Use `music21` to:
    - Don't assume one key covers the whole piece, and don't let the key signature settle it — a modulation between relatives needs no signature change. An accidental that acts as a raised 7th, resolving up a half step to a local tonic, establishes that minor key outright; reading the passage in the relative major instead would make the same note a raised 5th, which has no such function. If the piece's final cadence then confirms a different tonic, that's a real key change, not a tonicized vi or III: label each section in its own key and identify what joins them. A separate pivot chord belonging to both keys (e.g. VI in the minor doubling as IV in the relative major) is one option, but a deceptive V-III can carry the modulation by itself — the dominant resolves onto the relative major instead of i, and III is already the incoming tonic. Prefer whichever option gives the more consistent harmonic rhythm; don't insert a pivot chord that forces a mid-measure split the surrounding measures don't have.
    - When a melody note is a clean chord tone of more than one diatonic chord, don't default to whichever chord is already sustained out of inertia. Weigh the alternatives on their own merits by root motion, scoring both sides — the approach into the candidate from the chord before as well as its departure into the chord after. Where the candidates lead onward identically (both stepwise, say), the approach interval alone decides, and looking only forward will miss it. Rank the motions: descending fifth (equivalently ascending fourth) strongest, then descending fourth (ascending fifth), then descending or ascending second, then descending or ascending third lowest of these four. So where two chords fit the melody equally well, take whichever gives the higher-ranked motion. Also check whether the melody note simply doubles the candidate chord's own root, especially right at the moment of harmonic change — that produces a thin, under-supported texture even when nothing else is wrong with the choice, so prefer an equally-valid alternative that instead lands the melody on a different chord tone (3rd or 5th).
    - In a minor-key piece, once i has already held for one or more consecutive measures, actively check the relative major (III) before defaulting to i again for the next ambiguous measure — this check is required even when i already fits, not only when a note fails to fit it. If III is equally well-supported by the melody, prefer it for the color contrast.
-   - For any chord-to-chord move, check the candidate chord's root against the melody's motion, not just chord-tone consonance. If a chord's root is the same pitch as the melody note over it and both move in the same direction into the next chord's root/melody note, that's parallel unisons/octaves between "bass" and melody — reject the chord even if every melody note is a clean chord tone. This applies throughout the progression, not just at cadences.
+   - For any chord-to-chord move, check the candidate chord's root against the melody's motion, not just chord-tone consonance. Parallel unisons/octaves (where the root and the melody sit on the same pitch and then move by the *same* interval in the same direction, landing on a unison or octave again) — are not allowed. If this happens, reject the chord even if every melody note is a clean chord tone, and find a substitute.
    - If the piece's phrase lengths are otherwise inconsistent — e.g. most phrases share one length but a pair of shorter phrases sits joined by a full-stop cadence in between — and the melody at that seam resolves stepwise onto a non-tonic scale degree (often scale degree 6, landing on vi), check whether reading the approach as that chord's own secondary dominant (e.g. V/vi), rather than the main key's dominant resolving deceptively, removes the seam and merges the two short phrases into one matching the rest of the piece. Only make this call when it's actually fixing a real inconsistency in the piece's phrase structure — not as a routine substitute for an ordinary deceptive cadence.
    - An anacrusis does not automatically get its own chord. The piece's very first anacrusis — the pickup before any harmony has been established at all — should not be assigned a chord entry; the first harmony entry belongs at the true downbeat it leads into. Any other anacrusis, occurring mid-phrase, should instead be read as continuing whatever chord was already sounding beforehand (a decorative/non-chord tone over that preceding harmony), not as belonging to the chord it resolves into — the harmony only actually changes at the point where the anacrusis resolves onto its target note.
    - After harmonizing measure by measure, zoom out and check the cadential shape of the whole piece. A piece with no V chord anywhere is a red flag, even if every individual measure's chord looked well-justified in isolation — measure-level correctness doesn't guarantee a purposeful, arc-shaped harmonic structure overall. It is very important that a piece has a purposeful, arc-shaped harmonic structure. Reserve full plagal treatment for the places that genuinely don't support V, rather than letting it become the piece's only cadence type by default.
    - Give special scrutiny to the piece's actual final measure(s): if they read as a static tonic with some note explained away as a passing/neighbor decoration, check whether that "decorative" note is actually a genuine tone of V (most often its 5th) instead. If so, prefer the real V-I authentic cadence there — even if it lands the chord change on an unusual beat (e.g. beat 4, not just 1 or 3) — over ending the piece on an unsupported tonic pedal.
    - Before finalizing, check every carried-over chord (one simply continued from the previous measure, not freshly derived from its own notes) using the Bash tool with music21 rather than eyeballing it — carried-over chords are exactly where mistakes hide, since nothing prompted a fresh look. Confirm each strong-beat melody note is a genuine tone of that chord or resolves by step into one on the next note; a note that is neither is a hard sign the chord is wrong for that measure.
-2. Emit `music_analysis.json`.
+5. Emit `music_analysis.json`.
 
 ## Output
 
 Write `music_analysis.json` matching `schemas/music_analysis.schema.json`.
+
+`tempo_bpm` and `meter` are retained because vocal synthesis downstream converts beats to seconds with them. Choosing which line to sing is not this skill's job — `plan_vocals` selects the melody part itself.
+
+The `warnings` array must open with the two checkpoint decisions from step 2 — one warning giving the key and the evidence for it, one giving the anacrusis finding (whether confirmed, corrected, or checked and absent) and the evidence for that. State them even when unremarkable; "checked and found nothing" is a result. Everything else that needed a judgment call goes after them.
 
 Example:
 
@@ -107,28 +112,11 @@ Example:
     "meter": "4/4",
     "key": "C major",
     "measure_count": 16,
-    "parts": [
-      {
-        "id": "P1",
-        "name": "piano",
-        "range": ["C3", "G5"],
-        "role_guess": "accompaniment",
-        "density_score": 0.72
-      },
-      {
-        "id": "P2",
-        "name": "flute",
-        "range": ["C4", "A5"],
-        "role_guess": "melody_candidate",
-        "density_score": 0.31
-      }
-    ],
     "phrases": [
       {
         "id": "A1",
         "measures": [1, 4],
-        "cadence_guess": "half cadence",
-        "melody_candidate_part": "P2"
+        "cadence_guess": "half cadence"
       }
     ],
     "harmony": [
@@ -137,43 +125,12 @@ Example:
         "beat": 1.0,
         "chord_guess": "I"
       }
-    ],
-    "melody_candidates": [
-      {
-        "source_part": "P2",
-        "measures": [1, 8],
-        "note_count": 32,
-        "singability_score": 0.86,
-        "range": ["C4", "G5"]
-      }
     ]
   },
   "warnings": []
 }
 ```
 
-## Why this output is useful
-
-The next skill needs to decide where and how to sing. It needs compact facts:
-
-- which part probably carries the tune
-- where phrases start and end
-- whether the melody fits a singable range
-- how many melody notes are available
-- whether accompaniment conflicts with the vocal register
-
-## Suggested CLI
-
-```bash
-./bin/analyze_music basic_analysis.json --out music_analysis.json
-```
-
 ## Failure modes
 
-Return a nonzero exit code and diagnostic JSON if:
-
-- `basic_analysis.json` is missing or doesn't validate
-- the underlying MusicXML cannot be re-read for note/beat access
-- lyrics are empty
-
-If chords are uncertain, emit warnings instead of failing.
+If the score cannot be read, or no usable note material is found, report that rather than guessing. If chords are uncertain, emit warnings instead of failing.

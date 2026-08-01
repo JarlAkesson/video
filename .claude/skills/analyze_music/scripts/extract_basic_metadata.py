@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Mechanically extract tempo, meter, measure count, and per-part
-name/range/density from a MusicXML file — no LLM judgment involved.
+name/range from a MusicXML file — no LLM judgment involved.
 
 Usage:
     python3 extract_basic_metadata.py <path-to-musicxml>
@@ -11,7 +11,7 @@ Prints a JSON object to stdout:
   "meter": "4/4" | null,
   "measure_count": 8,
   "parts": [
-    {"id": "P1", "name": "Melody", "range": ["C4", "D5"], "note_count": 51, "density_score": 1.0}
+    {"id": "P1", "name": "Melody", "range": ["C4", "D5"], "note_count": 51}
   ]
 }
 
@@ -40,12 +40,10 @@ def extract(path):
         break
 
     parts_info = []
-    max_note_count = 0
     for i, part in enumerate(score.parts):
         measures = part.getElementsByClass("Measure")
         notes = [n for n in part.recurse().notes]
         note_count = len(notes)
-        max_note_count = max(max_note_count, note_count)
 
         pitches = []
         for n in notes:
@@ -65,9 +63,6 @@ def extract(path):
             "note_count": note_count,
             "measure_count": len(measures),
         })
-
-    for p in parts_info:
-        p["density_score"] = round(p["note_count"] / max_note_count, 2) if max_note_count else 0.0
 
     measure_count = max((p["measure_count"] for p in parts_info), default=0)
     for p in parts_info:

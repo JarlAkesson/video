@@ -33,7 +33,6 @@ gentle children's song, clear vocals, minimal melisma
 
 Use the LLM to decide:
 
-- which melody candidate should become the sung melody
 - whether lyrics repeat across phrases
 - whether to use one syllable per note or allow melismas
 - where breaths should happen

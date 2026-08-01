@@ -178,18 +178,13 @@ def main() -> None:
     warnings: list[str] = []
     arrangement_notes: list[dict] = []
 
-    # Select a melody candidate: highest singability, then highest note_count.
-    candidates = list(score_info.get("melody_candidates", []))
-    if not candidates:
-        raise SystemExit("No melody_candidates found in analysis.json")
-    candidates.sort(key=lambda c: (c.get("singability_score", 0.0), c.get("note_count", 0)), reverse=True)
-    selected = candidates[0]
-    selected_part_id = selected["source_part"]
-    part_index_0 = int(selected_part_id.lstrip("P")) - 1
-
     score = converter.parse(str(args.score))
-    if part_index_0 < 0 or part_index_0 >= len(score.parts):
-        raise SystemExit(f"Selected part {selected_part_id} out of range for score with {len(score.parts)} parts.")
+    if not score.parts:
+        raise SystemExit("Score contains no parts.")
+
+    # The score handed in is the melody to be sung -- there is no candidate to choose.
+    part_index_0 = 0
+    selected_part_id = "P1"
 
     note_events = list(_note_events_for_part(score, part_index_0))
     if not note_events:

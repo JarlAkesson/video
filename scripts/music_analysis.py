@@ -10,38 +10,6 @@ def _first_or_none(items):
     return None
 
 
-def _pitch_name_range(pitches) -> list[str]:
-    if not pitches:
-        return ["C4", "C4"]
-    low = min(pitches)
-    high = max(pitches)
-    return [low.nameWithOctave, high.nameWithOctave]
-
-
-def _density_score(part) -> float:
-    total = 0.0
-    sounded = 0.0
-    for el in part.flatten().notesAndRests:
-        ql = float(el.quarterLength)
-        total += ql
-        if el.isNote or el.isChord:
-            sounded += ql
-    if total <= 1e-9:
-        return 0.0
-    return max(0.0, min(1.0, sounded / total))
-
-
-def _singability_score(low_midi: int, high_midi: int) -> float:
-    # Heuristic: favor roughly C4–A5 (60–81), penalize extremes and very wide ranges.
-    target_low = 60
-    target_high = 81
-    width = max(0, high_midi - low_midi)
-    low_pen = max(0, target_low - low_midi) / 24.0
-    high_pen = max(0, high_midi - target_high) / 24.0
-    width_pen = max(0, width - 21) / 36.0
-    score = 1.0 - (0.9 * low_pen + 0.9 * high_pen + 0.6 * width_pen)
-    return max(0.0, min(1.0, score))
-
 
 def analyze_score(score, tempo_bpm_override: float | None = None) -> tuple[dict, list[str]]:
     warnings: list[str] = []
@@ -90,62 +58,6 @@ def analyze_score(score, tempo_bpm_override: float | None = None) -> tuple[dict,
         measure_count = 1
         warnings.append("Could not determine measure count; defaulting measure_count to 1.")
 
-    parts_out = []
-    melody_candidates = []
-    for idx, part in enumerate(score.parts, start=1):
-        part_id = f"P{idx}"
-        name = (part.partName or part.id or part_id).strip() if hasattr(part, "partName") else part_id
-        name_l = name.lower()
-
-        is_perc = any("drum" in (instr.partName or "").lower() for instr in part.getInstruments())
-        pitches = []
-        midi_vals = []
-        note_count = 0
-        for n in part.flatten().notes:
-            if n.isChord:
-                for p in n.pitches:
-                    pitches.append(p)
-                    midi_vals.append(int(p.midi))
-                note_count += len(n.pitches)
-            else:
-                # Some parts (notably percussion) may contain Unpitched events.
-                pitch = getattr(n, "pitch", None)
-                if pitch is None:
-                    continue
-                pitches.append(pitch)
-                midi_vals.append(int(pitch.midi))
-                note_count += 1
-
-        role_guess = "percussion" if is_perc else "accompaniment"
-        density = _density_score(part)
-        if not is_perc and density <= 0.45:
-            role_guess = "melody_candidate"
-
-        range_names = _pitch_name_range(pitches)
-        parts_out.append(
-            {
-                "id": part_id,
-                "name": name_l,
-                "range": range_names,
-                "role_guess": role_guess,
-                "density_score": density,
-            }
-        )
-
-        if not is_perc:
-            if midi_vals:
-                sing = _singability_score(min(midi_vals), max(midi_vals))
-            else:
-                sing = 0.0
-            melody_candidates.append(
-                {
-                    "source_part": part_id,
-                    "measures": [1, measure_count],
-                    "note_count": note_count,
-                    "singability_score": sing,
-                    "range": range_names,
-                }
-            )
 
     # Phrases: simple chunking into 4-measure phrases.
     phrases = []
@@ -184,9 +96,7 @@ def analyze_score(score, tempo_bpm_override: float | None = None) -> tuple[dict,
         "meter": meter_str,
         "key": key_str,
         "measure_count": measure_count,
-        "parts": parts_out,
         "phrases": phrases,
         "harmony": harmony,
-        "melody_candidates": melody_candidates,
     }
     return score_dict, warnings
