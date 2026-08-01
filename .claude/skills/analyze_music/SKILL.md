@@ -101,7 +101,7 @@ Write `music_analysis.json` matching `schemas/music_analysis.schema.json`.
 
 `tempo_bpm` and `meter` are retained because vocal synthesis downstream converts beats to seconds with them. Choosing which line to sing is not this skill's job — `plan_vocals` selects the melody part itself.
 
-The `warnings` array must open with the two checkpoint decisions from step 2 — one warning giving the key and the evidence for it, one giving the anacrusis finding (whether confirmed, corrected, or checked and absent) and the evidence for that. State them even when unremarkable; "checked and found nothing" is a result. Everything else that needed a judgment call goes after them.
+The `warnings` array is an audit trail; nothing downstream reads it. Always open it with the two step-2 checkpoints — key, and anacrusis (confirmed, corrected, or absent) — each with its evidence. After those, justify only close calls: a tie broken by root motion, a non-obvious split, a chromatic read as a secondary dominant, a revised reading. Say nothing where the fit is unambiguous, and never repeat boilerplate across songs (defaulted tempo, absent chord symbols, single-part role).
 
 Example:
 
