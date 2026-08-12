@@ -1,6 +1,6 @@
 ---
 name: clean-omr-transcription
-description: Use after Audiveris (or any OMR engine) has produced raw MusicXML from scanned sheet music, when the goal is a clean, trustworthy melody+accompaniment MusicXML/MuseScore deliverable. Covers scan-resolution tuning to avoid OMR failures, non-destructive rhythm normalization, melody-selection safety, voice/dynamics/chord-symbol cleanup, and time-signature deduplication. Complements sheet2xml (which only runs the OMR engine); this skill is the post-OMR cleanup pipeline.
+description: Post-OMR cleanup pipeline for scanned sheet music - turns raw Audiveris MusicXML into a trustworthy melody-only or melody+accompaniment MusicXML/MuseScore score. Covers song-boundary splitting, scan-resolution tuning, non-destructive measure-length repair, anacrusis and tuplet correctness, melody selection, and voice/hidden-element cleanup. Complements sheet2xml, which only runs the OMR engine.
 allowed-tools: Read Bash Grep Glob Write Edit
 argument-hint: [raw-omr-musicxml-or-source-pdf]
 effort: medium
@@ -10,154 +10,118 @@ effort: medium
 
 Turn raw Audiveris + music21 output into a score a musician can trust.
 
-**Governing principle: melody-note accuracy wins.** Preserve real notes or
-remove genuine noise — never guess-and-hope. Leave ambiguous content untouched
-and report it rather than "fixing" it.
+**Governing principle: melody-note accuracy wins.** The scripts never delete a
+note — they repair or report. When one reports a problem it cannot fix, decide;
+don't reach for a fix that trades notes for tidiness.
 
-## 1. Scan resolution
+The rules live in `scripts/`, not in this file. Run them; read them only if one
+misbehaves. All paths below are relative to this skill's directory.
 
-Before blaming OMR quality for "Too large image", `BEAMS`/`GRID` timeouts, or
-wrong notes, check the source PDF's geometry.
+## Pipeline
 
-- Audiveris rasterizes from the PDF's **declared physical page size**, not the
-  embedded image's pixel count. A bloated declared size (e.g. 40x27 in) forces
-  internal upsampling → blur, slowness, per-step timeouts.
-- Fix: rebuild the PDF at a sane page size (derive points-per-pixel empirically
-  from a known-good page, e.g. `~4.12 px/pt`).
-- Separately, upsampling the **embedded image** to ~18M px (under Audiveris's
-  20M cap) measurably improves accuracy. Test one page against the source
-  before a full reprocess.
-- Never raise `maxPixelCount` — large images hit a hardcoded step timeout
-  regardless of the pixel cap.
+```bash
+# 1. Before blaming OMR quality, check the scan geometry
+scripts/fix_pdf_geometry.py book.pdf --report
+scripts/fix_pdf_geometry.py book.pdf -o book_fixed.pdf   # if it says REBUILD
 
-## 2. Rhythm normalization is PAD-ONLY
+# 2. Find where each song starts (see "What needs your eyes")
+scripts/find_title_bands.py book.pdf --out /tmp/bands --first-page 4
 
-Never trim or delete to make a measure fit its time signature — that causes
-silent note loss invisible to duration-only checks.
+# 3. Run Audiveris per song range (sheet2xml, or -sheets N-M on an .omr)
 
-- Measure shorter than expected → pad with rests.
-- Measure longer than expected → **leave untouched**, report as informational.
-- Build a **fresh** `Duration(quarterLength=...)`; never mutate `.quarterLength`
-  in place (stale `Tuplet` metadata corrupts export).
-- `Duration.type == 'complex'` (e.g. qL 2.5) cannot serialize — split via
-  `Duration.components` into tied simple notes.
-- A voice starting mid-measure is invalid — fill the leading gap with
-  decomposed simple rests, not one complex rest.
-- If a time signature first appears partway through, backfill it onto earlier
-  measures (Audiveris often misses the first system's header).
+# 4. Clean each raw export
+scripts/normalize_measures.py raw/*.mxl --out-dir out --melody-only \
+    --composer "..."
 
-## 3. Melody selection
+# 5. Verify what was actually delivered — including the .mscz if you ship one
+scripts/verify_score.py out/*.musicxml --max-voices 1
+scripts/verify_score.py out/*.mscz --max-voices 1
+```
 
-Multiple spurious "Voice" parts (common with multi-verse hymnals) do not mean
-multiple melodies.
+`normalize_measures.py` verifies its own output, so step 5 matters most for
+files that went through another tool (a `.mscz` round trip, a manual edit).
+Both scripts exit non-zero on any problem, so they gate a loop.
 
-- Pick the "Voice" part with the **most real notes**, never the first one —
-  Audiveris's first can be nearly empty.
-- Route non-chosen "Voice" parts into the accompaniment pool, don't discard.
-- If melody comes from a piano RH part, exclude that part from accompaniment
-  or the melody is duplicated.
+## What needs your eyes
 
-## 4. Voices
+Five things no script can settle:
 
-Solo melody + piano never has more than 2 real voices per staff.
+1. **Reading the titles.** `find_title_bands.py` crops and stacks the bands;
+   you read the composites. A scanned PDF has no text layer and the `.omr`
+   usually has no OCR either. Confirm each song runs from its numbered title to
+   just before the next number up.
+2. **Whether a page-range split is safe.** The script reports mid-page bands.
+   Any of them that is a *title* (not lyrics) means a song starts mid-page and
+   page ranges will cut songs in half. Also watch for an unnumbered appendix at
+   the end, and exclude the staff-less pages it lists (extra verses set as text).
+3. **Comparing a render against the scanned source.** The only check that
+   catches a wrong pitch; structural checks never will. Sample the songs with
+   multiple "Voice" parts, irregular measures, or low OMR confidence.
+4. **Invented rhythm.** Count dotted notes and tuplets in the raw melody
+   against the delivered file (`references/rare-repairs.md`). Both get invented
+   by anything that scales a bar to fit its meter, and both look deliberate on
+   the page. An increase needs a reason.
+5. **Note-count deltas.** Compare raw vs final per part. Expect legitimate
+   movement — tie splitting inflates counts, collapsing duplicate-verse voices
+   or unison doublings reduces them. Localize before treating a delta as loss.
 
-- Remove any Voice sub-stream with no non-rest note.
-- If >2 real voices remain in a measure: sort by real-note count, keep the top
-  2, and merge notes from the excess into whichever kept voice has no timing
-  conflict at that span — preserve every note.
-- Run this pass twice: per-song, and again on the assembled combined score
-  (re-flattening voice IDs can reintroduce strays). Also re-check post-write
-  (see §10).
+## Defaults that are judgment calls
 
-## 5. Strip unrequested markings
+| Flag | Default | When the default is wrong |
+|---|---|---|
+| `--melody-only` | off | Usually **on** is right: it's cheaper and skips the voice-flattening that endangers tuplets. Ask before transcribing the piano. |
+| `--anacrusis` | `auto` | `auto` unpads a rest-padded pickup only when pickup + final bar completes one bar. Shape alone can't tell a padded pickup from an opening bar the composer wrote full. Use `always` if house style is that every upbeat is engraved as a short pickup bar. |
+| `--no-triplets` | off | Tuplets are kept only where **obvious** — the engine tagged the run AND the bar already sums to its meter with it. An engine tag alone is not evidence: Audiveris emits tuplets as a by-product of misreading a bar. Use this flag to suppress them entirely. |
+| `--min-trailing-rests` | 2 | Trailing all-rest bars are deleted once this many follow the last note. |
+| `--max-voices` | 2 | Use 1 for melody-only. |
 
-Unless the user asks for them, remove all `Dynamic` and `ChordSymbol` objects,
-and strip fermatas by default (OMR fermatas over barlines/rests are usually
-spurious for strophic songs). Harmonic analysis is a separate, higher-risk
-step — do it only when explicitly requested.
+## When a script reports a problem
 
-## 6. Time signatures
+- **`OVERLONG`** — a bar the ordered repairs could not fit. See
+  `references/rare-repairs.md`. Never resolve it by deleting a note.
+- **`short`** — a bar under its meter outside the legal pickup/final positions.
+  Usually a missed meter, not a missed note.
+- **`rest in non-primary voice` / `print-object="no"`** — the file will
+  reintroduce hidden rests on the next round trip. Re-run with one voice per
+  staff; see `references/multi-part.md` for why voice numbering misleads here.
+- **`WRITE DID NOT CONVERGE`** — music21's exporter inflated a part's measure
+  count (observed 301 → 418) with no error. `safe_write` already retried from
+  the in-memory score five times. Do not "fix" it by re-parsing and rewriting
+  the written file; that compounds it. Confirm a manual MuseScore fix with the
+  user rather than shipping corruption.
+- **`anacrusis-rejected-by-arithmetic`** — a bar looked like a padded pickup
+  but pickup + final didn't complete a bar. Check the source before overriding
+  with `--anacrusis always`.
 
-- Keep an explicit `TimeSignature` only on the **first measure of each song**
-  and on genuine meter changes (ratio string differs from previous).
-- De-duplicate as the **very last step before writing** — earlier, and
-  validation logic reading `mm.timeSignature` directly will skip measures.
-- Apply to both per-song files and the combined score.
-
-## 7. Grand staff
-
-- Use `stream.PartStaff` per hand joined by
-  `layout.StaffGroup([rh, lh], symbol='brace')` → one `<score-part>` with
-  `<staves>2</staves>`.
-- Strip leftover `Instrument` objects and set `instrument.Piano()` explicitly,
-  or MuseScore shows the wrong instrument despite a correct `partName`.
-
-## 8. Cross-part measure-number gaps
-
-Watch for parts with matching measure *counts* but mismatched *numbers*
-(Melody `1..9` vs Piano `2..10`). Padding a rest measure at the **end** hides
-the mismatch while shifting every measure's position — which compounds across
-songs during combined-score assembly into gross corruption.
-
-- Correct fix: take the part with the most measures as the reference number
-  sequence, find which numbers each other part is missing, and insert padding
-  at the correct **ordinal position**.
-- Per-song counts matching is not proof — always verify the final combined
-  score's per-part counts too.
-
-## 9. Naming
+## Naming
 
 `{BOOK_ABBR}_{book_number}_{song_number:02d}_{slug}_v{version}.musicxml`
-(e.g. `SMOM_1_01_julafton_v1.musicxml`)
+(e.g. `SMOM_1_01_julafton_v1.musicxml`) — `omrlib.deliverable_name()` builds it.
 
 - `BOOK_ABBR`: initials of the book title, fixed once per series.
-- `song_number`: zero-padded order of appearance **in the book**, not OMR
-  sheet numbering.
-- `slug`: strip any leading `"N. "` from the title, then
-  `unicodedata.normalize('NFKD', ...)` → ascii-encode (drop non-ascii) →
-  lowercase → runs of non-alphanumerics to `_` → strip edge `_`.
-- `version`: restart at `v1` whenever the convention changes.
+- `song_number`: order of appearance **in the book**, not OMR sheet numbering.
+- `version`: bump when replacing an already-delivered set with a materially
+  different transcription; overwrite in place only while still iterating before
+  hand-off. Restart at `v1` only if the convention itself changes.
 
 **Rename per-song files only.** Leave combined whole-book deliverables under
-their existing names (confirm with the user rather than assuming). On a
-pipeline re-run, output names derive from the *raw source* filename, so delete
-stale renamed files first instead of expecting overwrites.
+their existing names (confirm rather than assuming). On a re-run, output names
+derive from the *raw source* filename, so delete stale renamed files first
+instead of expecting overwrites.
 
-## 10. The MusicXML writer is not idempotent
-
-music21's export can introduce a spurious empty voice, or inflate a
-`PartStaff`'s measure count (observed 301 → 418) with no error. Re-parsing and
-rewriting a corrupted file does not converge and can make inflation worse.
-
-1. Do all cleanup on the **original in-memory score** before writing.
-2. Write once; re-parse and check (a) voice violations and (b) every part's
-   measure count against in-memory reference counts taken before the write.
-3. If (b) fails, rewrite the **original in-memory score** from scratch — never
-   the corrupted file. Cap retries (~5) and warn if it never converges.
-4. If only (a) fails, it is safe to re-parse, clean voices in place, rewrite.
-5. If a few measures still resist, confirm a manual MuseScore fix with the
-   user rather than looping or shipping corruption.
-
-## 11. Validation before calling a book done
-
-Structural checks never catch "wrong Voice part" or "wrong pitch."
-
-1. Zero empty voices, max 2 voices/staff — verified by re-parsing the output
-   file, not in-memory state.
-2. Zero unwanted Dynamics/ChordSymbols.
-3. Time signatures only at genuine starts/changes.
-4. **Render a sample and eyeball it against the scanned source pages**,
-   especially songs with multiple "Voice" parts, irregular measures, or low
-   OMR confidence.
-5. Compare per-song note counts, raw OMR vs final — investigate any large
-   unexplained delta in either direction.
-
-## 12. Process notes
+## Process notes
 
 - Re-exporting via `-sheets N-M` produces either `<bookname>.mxl` or
   `<bookname>.mvtnull.mxl` — check both, or every song silently overwrites the
-  same scratch file.
+  same scratch file. Audiveris ignores `-output` for `.omr` input and writes
+  beside the book.
 - Don't run Audiveris books in parallel; CPU-heavy steps (SYMBOLS/BEAMS)
   throttle each other even with idle cores.
-- Save pipeline scripts to a durable project path, never `/tmp` or a session
-  scratchpad.
+- Never raise Audiveris's `maxPixelCount` to allow native resolution — large
+  images hit a hardcoded step timeout regardless of the pixel cap.
+
+## Conditional references
+
+- `references/multi-part.md` — grand staff and combined-book assembly. Load
+  only when accompaniment or a whole-book score is in scope.
+- `references/rare-repairs.md` — bars that resist the ordered repairs.
