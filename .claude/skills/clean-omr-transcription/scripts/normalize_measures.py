@@ -54,6 +54,13 @@ def build(score, args, scope):
     if not args.no_triplets:
         omrlib.tag_omr_tuplets(melody)
     omrlib.force_monophonic(melody)
+    # Baseline for the invented-rhythm check: same note set as the output, with
+    # the engraver's own durations, before any repair that could add an ornament.
+    # Degenerate bars are recovered first -- their durations are noise until
+    # rescaled, so censusing them earlier would understate the source and make
+    # the recovery look like invention.
+    omrlib.rescale_degenerate_bars(melody, scope)
+    baseline = omrlib.census_stream(melody)
     for p in parts:
         omrlib.strip_fermatas(p)
         omrlib.strip_markings(p, dynamics=not args.keep_dynamics,
@@ -107,21 +114,31 @@ def build(score, args, scope):
     for p in out.parts:
         omrlib.mark_tuplet_brackets(p)
         omrlib.dedupe_time_signatures(p)
-    return out, pickup, dropped
+    return out, pickup, dropped, baseline
 
 
 def process(src, dst, args):
     scope = os.path.basename(src)
     omrlib.reset_log()
     score = omrlib.read_any(src)
-    out, pickup, dropped = build(score, args, scope)
+    out, pickup, dropped, baseline = build(score, args, scope)
 
-    ok, counts = omrlib.safe_write(out, dst)
+    ok, counts = omrlib.safe_write(out, dst, keep_breaks=args.keep_breaks)
     problems = omrlib.verify_xml(dst, os.path.basename(dst),
-                                 max_voices=1 if args.melody_only else 2)
+                                 max_voices=1 if args.melody_only else 2,
+                                 allow_breaks=args.keep_breaks)
     notes, rests = omrlib.count_notes(dst)
+    after = omrlib.census_xml(dst)
+    invented = omrlib.invented_rhythm(baseline, after)
+    for kind, n in invented.items():
+        if n:
+            problems.append(
+                f'{os.path.basename(dst)}: INVENTED {n} {kind} '
+                f'({baseline.get(kind, 0)} in source -> {after.get(kind, 0)} out) '
+                f'-- see references/rare-repairs.md')
     return {
         'src': src, 'dst': dst,
+        'rhythm_before': baseline, 'rhythm_after': after, 'invented': invented,
         'write_converged': ok, 'measure_counts': counts,
         'pickup_len': pickup, 'trailing_rest_measures_dropped': dropped,
         'notes': notes, 'rests': rests,
@@ -153,6 +170,9 @@ def main():
                          "rebarring upbeats the source wrote as full bars. never: off")
     ap.add_argument('--min-trailing-rests', type=int, default=2,
                     help='delete trailing all-rest measures once this many follow (default 2)')
+    ap.add_argument('--keep-breaks', action='store_true',
+                    help='keep the source page/system breaks (stripped by default: '
+                         'they record where the SCAN broke, not the music)')
     ap.add_argument('--json', action='store_true')
     args = ap.parse_args()
 

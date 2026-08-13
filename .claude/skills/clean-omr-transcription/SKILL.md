@@ -14,6 +14,15 @@ Turn raw Audiveris + music21 output into a score a musician can trust.
 note — they repair or report. When one reports a problem it cannot fix, decide;
 don't reach for a fix that trades notes for tidiness.
 
+**Never invent rhythm.** Dotted notes and tuplets must not appear where the
+source has none. Both are created the same way — by a repair reaching for a
+longer note value to make a bar add up — and neither is caught by any check of
+measure length, note count or voices; a bar full of invented dotted quarters
+passes all three. `normalize_measures.py` therefore counts dotted and tuplet
+elements before and after every run and reports any increase as `INVENTED`.
+Treat that as a defect, not a note: the rules and the reasoning are in
+`references/rare-repairs.md`, and the specific traps are listed there.
+
 The rules live in `scripts/`, not in this file. Run them; read them only if one
 misbehaves. All paths below are relative to this skill's directory.
 
@@ -57,10 +66,9 @@ Five things no script can settle:
 3. **Comparing a render against the scanned source.** The only check that
    catches a wrong pitch; structural checks never will. Sample the songs with
    multiple "Voice" parts, irregular measures, or low OMR confidence.
-4. **Invented rhythm.** Count dotted notes and tuplets in the raw melody
-   against the delivered file (`references/rare-repairs.md`). Both get invented
-   by anything that scales a bar to fit its meter, and both look deliberate on
-   the page. An increase needs a reason.
+4. **Any `INVENTED` report.** The count is automatic; deciding whether a
+   genuine increase is justified is not. The only legitimate one seen so far is
+   a degenerate bar whose ornaments were unreadable until it was rescaled.
 5. **Note-count deltas.** Compare raw vs final per part. Expect legitimate
    movement — tie splitting inflates counts, collapsing duplicate-verse voices
    or unison doublings reduces them. Localize before treating a delta as loss.
@@ -89,6 +97,9 @@ Five things no script can settle:
   the in-memory score five times. Do not "fix" it by re-parsing and rewriting
   the written file; that compounds it. Confirm a manual MuseScore fix with the
   user rather than shipping corruption.
+- **`INVENTED n dotted` / `INVENTED n tuplets`** — a repair added ornaments the
+  source does not have. Do not ship it. Find which repair widened the vocabulary
+  (`references/rare-repairs.md` names the three that can).
 - **`anacrusis-rejected-by-arithmetic`** — a bar looked like a padded pickup
   but pickup + final didn't complete a bar. Check the source before overriding
   with `--anacrusis always`.

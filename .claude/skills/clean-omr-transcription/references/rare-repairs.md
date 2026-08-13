@@ -66,10 +66,16 @@ everywhere in this repertoire. Three rules keep them honest:
    a dotted-quarter rest that looks deliberate. A wholly empty bar is the
    exception: one full-measure rest is conventional there.
 
-Audit it the same way as tuplets -- count dotted elements in the raw melody
-against the delivered file. Legitimate movement is downward (the `undot` repair
-removing a spurious augmentation dot, or a duplicate voice collapsing); an
-increase needs a reason.
+`normalize_measures.py` audits this automatically (`census_stream` before,
+`census_xml` after) and reports any increase as `INVENTED`. Legitimate movement
+is downward -- the `undot` repair removing a spurious augmentation dot, a
+rejected tuplet, a duplicate voice collapsing. An increase is a defect.
+
+One false positive is known and handled: a degenerate bar has no readable
+ornaments until it is rescaled, so the baseline is taken AFTER
+`rescale_degenerate_bars`, and the rescale snaps to real note values (thirds
+only where the engine tagged a tuplet). Without both of those the recovery
+itself reads as invention.
 
 ## Tuplets that should not be there
 

@@ -12,6 +12,7 @@ Checks per file:
   * rests only in each staff's FIRST voice
   * nothing hidden (no print-object="no"), no <multiple-rest>
   * at most --max-voices voices per staff
+  * no page or system breaks (unless --allow-breaks)
   * no run of trailing all-rest measures
 
 Examples
@@ -37,12 +38,23 @@ import omrlib  # noqa: E402
 def check_one(path, args, tmpdir):
     """Return (label, problems). .mscz is converted out first."""
     label = os.path.basename(path)
+    extra = []
+    allow_breaks = args.allow_breaks
     if path.lower().endswith('.mscz'):
+        # Breaks are read from the .mscz itself, not from its MusicXML export:
+        # MuseScore always marks every system it laid out in the export, so the
+        # export cannot distinguish a stored break from automatic layout.
+        if not allow_breaks:
+            n = omrlib.mscz_layout_breaks(path)
+            if n:
+                extra.append(f'{label}: contains {n} stored layout break(s)')
+        allow_breaks = True
         out = os.path.join(tmpdir, label + '.musicxml')
         if not omrlib.mscz_to_musicxml(path, out, args.musescore):
             return label, [f'{label}: MuseScore failed to convert']
         path = out
-    return label, omrlib.verify_xml(path, label, max_voices=args.max_voices)
+    return label, extra + omrlib.verify_xml(path, label, max_voices=args.max_voices,
+                                            allow_breaks=allow_breaks)
 
 
 def main():
@@ -53,6 +65,8 @@ def main():
                     help='voices allowed per staff (default 2; use 1 for melody-only)')
     ap.add_argument('--also-mscz', metavar='FILE', action='append', default=[],
                     help='additionally check these .mscz round trips')
+    ap.add_argument('--allow-breaks', action='store_true',
+                    help='permit page/system breaks (reported as problems by default)')
     ap.add_argument('--musescore', help='path to the MuseScore CLI')
     ap.add_argument('--json', action='store_true', help='machine-readable output')
     ap.add_argument('--quiet', action='store_true', help='only print the summary line')

@@ -403,8 +403,14 @@ def rescale_degenerate(container, expected, scope=''):
         # triplet). Re-attaching the old tuplet on top applies the ratio twice
         # and yields a duration the exporter cannot name.
         container.setElementOffset(el, float(el.offset) * scale)
+        # Snap to a real note value: raw scaling lands on things like 0.3335,
+        # which is neither a clean third nor a clean binary value, so the bar
+        # reads as having no ornaments at all and a later census mistakes the
+        # recovery for invention. Thirds are only on the menu where the engine
+        # tagged a tuplet, so rescaling cannot introduce one.
+        vocab = WITH_TRIPLETS if is_tagged(el) else BINARY
         el.duration = m21.duration.Duration(
-            quarterLength=max(float(el.duration.quarterLength) * scale, 0.125))
+            quarterLength=nearest(float(el.duration.quarterLength) * scale, vocab))
     log(scope, 'rescale-degenerate-bar', cur, expected)
     return True
 
@@ -473,6 +479,17 @@ def resolve_overlong(container, expected, allowed, scope='', allow_carry=True):
         each = avail / len(run)
         if abs(each - float(run[0].duration.quarterLength)) < EPS:
             continue
+        # The value must be a genuine TUPLET value: in the triplet vocabulary
+        # and NOT expressible in binary. This rule exists to recover a tuplet the
+        # engine lost. Let it land on a binary value and it stops being a tuplet
+        # rule and simply invents dotted notes -- a 0.75 span shared by two notes
+        # becomes two dotted sixteenths, which is what it did to book 4's
+        # "Spranga kloster". It must also be exactly representable, or a later
+        # rebuild drops the part of each note it cannot name.
+        if not any(abs(a - each) < 1e-9 for a in WITH_TRIPLETS):
+            continue
+        if any(abs(a - each) < 1e-9 for a in BINARY):
+            continue
         if not any(abs(a - each) < 1e-9 for a in allowed):
             continue
         off = run_start
@@ -528,6 +545,24 @@ def effective_time_signatures(part):
             current = first
         out.append((mm, current.barDuration.quarterLength if current else None))
     return out
+
+
+def rescale_degenerate_bars(part, scope=''):
+    """Run the degenerate-bar repair over a whole part, on its own.
+
+    Called before the rhythm census is taken. A bar whose durations collapsed to
+    near zero has no readable dots or tuplets to count, so censusing it first
+    would understate the source and make the recovery look like invention.
+    The repair is guarded and idempotent, so running it here and again inside
+    normalize_part is harmless.
+    """
+    n = 0
+    for mm, expected in effective_time_signatures(part):
+        if expected is None:
+            continue
+        for c in (list(mm.voices) or [mm]):
+            n += bool(rescale_degenerate(c, expected, f'{scope} m{mm.number}'))
+    return n
 
 
 def normalize_part(part, allowed, monophonic=False, scope=''):
@@ -1158,7 +1193,22 @@ def primary_voice_per_staff(pbody):
     return {st: str(v) for st, v in seen.items()}
 
 
-def clean_xml(path):
+def strip_breaks(xml):
+    """Remove page and system breaks.
+
+    These are the OMR engine's record of where the SCAN happened to break, not
+    anything musical -- keeping them forces a fresh engraving to reproduce the
+    old page turns. The <print> wrapper is dropped only if nothing else is left
+    in it, so genuine layout children survive.
+    """
+    xml = re.sub(r'\s+new-page="[^"]*"', '', xml)
+    xml = re.sub(r'\s+new-system="[^"]*"', '', xml)
+    xml = re.sub(r'\s*<print\s*/>', '', xml)
+    xml = re.sub(r'\s*<print\s*>\s*</print>', '', xml)
+    return xml
+
+
+def clean_xml(path, keep_breaks=False):
     """Post-process written MusicXML so the guarantees hold in the delivered file.
 
     Removes Audiveris's false <multiple-rest> (a reader expands it and inflates
@@ -1189,11 +1239,13 @@ def clean_xml(path):
 
     xml = PART_RE.sub(fix_part, xml)
     xml = xml.replace(' print-object="no"', '')
+    if not keep_breaks:
+        xml = strip_breaks(xml)
     with open(path, 'w', encoding='utf-8') as fh:
         fh.write(xml)
 
 
-def safe_write(score, path, attempts=5):
+def safe_write(score, path, attempts=5, keep_breaks=False):
     """Write MusicXML and confirm the file matches the in-memory score.
 
     music21's exporter is not idempotent: it can inflate a PartStaff's measure
@@ -1209,7 +1261,7 @@ def safe_write(score, path, attempts=5):
             score.write('musicxml', path, makeNotation=False)
         except Exception:
             score.write('musicxml', path)
-        clean_xml(path)
+        clean_xml(path, keep_breaks=keep_breaks)
         parsed = m21.converter.parse(path)
         got = [len(list(p.getElementsByClass('Measure'))) for p in parsed.parts] or [
             len(list(parsed.getElementsByClass('Measure')))]
@@ -1251,7 +1303,7 @@ def measure_spans(body, divisions):
     return hi, ends
 
 
-def verify_xml(path, label=None, max_voices=2):
+def verify_xml(path, label=None, max_voices=2, allow_breaks=False):
     """Check a written MusicXML file against every rule in SKILL.md that can be
     checked mechanically. Returns a list of problem strings."""
     label = label or path
@@ -1263,6 +1315,11 @@ def verify_xml(path, label=None, max_voices=2):
         problems.append(f'{label}: contains print-object="no" (hidden element)')
     if '<multiple-rest' in xml:
         problems.append(f'{label}: contains a multiple-rest')
+    if not allow_breaks:
+        n = len(re.findall(r'new-page="yes"', xml))
+        m = len(re.findall(r'new-system="yes"', xml))
+        if n or m:
+            problems.append(f'{label}: contains {n} page break(s) and {m} system break(s)')
 
     for pm in PART_RE.finditer(xml):
         pid, pbody = pm.group(1), pm.group(2)
@@ -1355,12 +1412,77 @@ def mscz_to_musicxml(mscz_path, out_path, musescore=None):
     return r.returncode == 0
 
 
+def mscz_layout_breaks(path):
+    """Count explicit layout breaks stored inside a .mscz.
+
+    The authoritative check for a MuseScore file. Its MusicXML EXPORT always
+    writes new-system="yes" at every system it laid out -- that is MuseScore
+    describing its own automatic line breaking, not a break saved in the score,
+    so testing the export reports breaks that do not exist.
+    """
+    import zipfile
+    with zipfile.ZipFile(path) as z:
+        names = [n for n in z.namelist() if n.endswith('.mscx')]
+        raw = b''.join(z.read(n) for n in names).decode('utf8', errors='replace')
+    return len(re.findall(r'<LayoutBreak>', raw))
+
+
 def to_mscz(xml_path, mscz_path, musescore=None):
     exe = find_musescore(musescore)
     if not exe:
         raise RuntimeError('MuseScore CLI not found; pass --musescore PATH')
     r = subprocess.run([exe, '-o', str(mscz_path), str(xml_path)], capture_output=True, text=True)
     return r.returncode == 0
+
+
+# ---------------------------------------------------------------------------
+# Rhythm census -- the guard against invented dots and tuplets
+# ---------------------------------------------------------------------------
+#
+# Both mistakes have the same shape: a repair reaches for a longer vocabulary to
+# make a bar add up, and the result looks deliberate on the page. Neither shows
+# up in a measure-length check, a note count, or a voice check -- every one of
+# those passes happily on a bar full of invented dotted quarters. The only thing
+# that catches them is counting the ornaments before and after.
+
+def census_stream(part):
+    """Count dotted and tuplet elements in an in-memory part."""
+    dots = tuplets = 0
+    for el in part.recurse().notesAndRests:
+        if el.duration.dots:
+            dots += 1
+        if getattr(el.duration, 'tuplets', ()):
+            tuplets += 1
+    return {'dotted': dots, 'tuplets': tuplets}
+
+
+def census_xml(path):
+    """Count dotted notes, dotted rests and tuplet elements in a written file."""
+    with open(path, encoding='utf-8') as fh:
+        xml = fh.read()
+    dotted_notes = dotted_rests = 0
+    for b in NOTE_RE.findall(xml):
+        if '<dot' in b:
+            if '<rest' in b:
+                dotted_rests += 1
+            else:
+                dotted_notes += 1
+    return {'dotted': dotted_notes + dotted_rests,
+            'dotted_notes': dotted_notes,
+            'dotted_rests': dotted_rests,
+            'tuplets': len(re.findall(r'<time-modification>', xml))}
+
+
+def invented_rhythm(before, after):
+    """What the pipeline ADDED. Anything above zero needs a reason.
+
+    Decreases are normal and expected -- the undot repair removing a spurious
+    augmentation dot, a rejected tuplet, a duplicate-verse voice collapsing.
+    Increases are the failure mode: in book 3 an unconstrained bar solver
+    invented 46 tuplets and 43 dots, and every other check passed.
+    """
+    return {k: max(0, after.get(k, 0) - before.get(k, 0))
+            for k in ('dotted', 'tuplets')}
 
 
 # ---------------------------------------------------------------------------
