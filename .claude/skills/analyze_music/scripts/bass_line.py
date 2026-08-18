@@ -18,6 +18,9 @@ Checks:
            one direction. It fails on a held bass (not motion) or an
            oscillation, bass leaving and returning to one note (I-V6-I, A-G#-A),
            where root position gives the stronger fourth-leap between roots.
+           One held bass is always legal and needs no other justification: the
+           cadential six-four, I64 over degree 5 resolving to V before the bass
+           drops to 1. Other pedals stay a fault -- use them sparingly.
            Where NEITHER side steps, contour says nothing -- root motion by
            thirds or fourths is just root motion -- and the case is "n/a".
 
@@ -78,8 +81,27 @@ def chain_end(bass, i):
     return j
 
 
-def inversion_ok(bass, is_inv, i):
+def cadential_64(chords, bass, tonic, i):
+    """Is chords[i] a cadential six-four -- I64 over a held degree-5 bass into V?
+
+    The one pedal that is always idiomatic: the bass takes scale degree 5 and
+    holds it while I64 resolves to V, then drops to 1. Spell it I64 (or Cad64);
+    V64 is a different chord, with degree 2 in the bass.
+    """
+    if i + 1 >= len(chords):
+        return False
+    c, nx = chords[i], chords[i + 1]
+    if c.inversion() != 2 or nx.inversion() != 0 or bass[i] != bass[i + 1]:
+        return False
+    def deg(name):
+        return (m21.pitch.Pitch(name).pitchClass - tonic) % 12
+    return deg(bass[i]) == 7 and deg(c.root().name) == 0 and deg(nx.root().name) == 7
+
+
+def inversion_ok(bass, is_inv, i, cad=frozenset()):
     """True / False / None (not assessed)."""
+    if i in cad:
+        return True                                  # cadential six-four
     if i == 0 or i + 1 >= len(bass):
         return False
     d1 = signed_step(bass[i - 1], bass[i])
@@ -162,10 +184,11 @@ def analyse(path):
     is_inv = [c.inversion() != 0 for c in chords]
     inv = [i for i, v in enumerate(is_inv) if v]
 
+    cad = {i for i in inv if cadential_64(chords, bass, tonic, i)}
     ok, bad, na, land, deg6 = [], [], [], [], []
     for i in inv:
         tag = f"m{entries[i]['measure']}{entries[i]['chord_guess']}"
-        r = inversion_ok(bass, is_inv, i)
+        r = inversion_ok(bass, is_inv, i, cad)
         (na if r is None else ok if r else bad).append(tag)
         j = chain_end(bass, i)
         if is_inv[j]:
