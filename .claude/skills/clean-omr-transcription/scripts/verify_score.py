@@ -15,6 +15,13 @@ Checks per file:
   * no page or system breaks (unless --allow-breaks)
   * no run of trailing all-rest measures
 
+Also reports RHYTHM SUSPECTS: bars that look like a dot was dropped, found by
+arithmetic residue (a bar ending in a rest shorter than a beat) and by rhythm
+outliers (a bar that would match a pattern used elsewhere in the song if one
+dot were restored). These are suspicions, not violations -- they are printed
+separately and do NOT affect the exit status, because the file is legal either
+way and only the scan can settle it. Use --no-rhythm to skip them.
+
 Examples
 --------
   verify_score.py out/*.musicxml
@@ -53,8 +60,15 @@ def check_one(path, args, tmpdir):
         if not omrlib.mscz_to_musicxml(path, out, args.musescore):
             return label, [f'{label}: MuseScore failed to convert']
         path = out
-    return label, extra + omrlib.verify_xml(path, label, max_voices=args.max_voices,
-                                            allow_breaks=allow_breaks)
+    problems = extra + omrlib.verify_xml(path, label, max_voices=args.max_voices,
+                                         allow_breaks=allow_breaks)
+    suspects = []
+    if not args.no_rhythm:
+        try:
+            suspects = omrlib.rhythm_suspects(path, min_support=args.rhythm_support)
+        except Exception as exc:                     # never let an advisory break a check
+            suspects = [f'could not run the rhythm check ({exc})']
+    return label, problems, suspects
 
 
 def main():
@@ -68,19 +82,26 @@ def main():
     ap.add_argument('--allow-breaks', action='store_true',
                     help='permit page/system breaks (reported as problems by default)')
     ap.add_argument('--musescore', help='path to the MuseScore CLI')
+    ap.add_argument('--no-rhythm', action='store_true',
+                    help='skip the dropped-dot suspects (advisory, never gates)')
+    ap.add_argument('--rhythm-support', type=int, default=3, metavar='N',
+                    help='a repaired rhythm must appear in N other bars (default 3)')
     ap.add_argument('--json', action='store_true', help='machine-readable output')
     ap.add_argument('--quiet', action='store_true', help='only print the summary line')
     args = ap.parse_args()
 
-    results = {}
+    results, suspect = {}, {}
     with tempfile.TemporaryDirectory() as tmp:
         for path in list(args.files) + list(args.also_mscz):
-            label, problems = check_one(path, args, tmp)
+            label, problems, sus = check_one(path, args, tmp)
             results[label] = problems
+            if sus:
+                suspect[label] = sus
 
     total = sum(len(v) for v in results.values())
     if args.json:
-        print(json.dumps({'files': len(results), 'problems': total, 'detail': results}, indent=2))
+        print(json.dumps({'files': len(results), 'problems': total, 'detail': results,
+                          'rhythm_suspects': suspect}, indent=2))
     else:
         if not args.quiet:
             for label, problems in results.items():
@@ -88,8 +109,13 @@ def main():
                     print(f'{label}: {len(problems)} problem(s)')
                     for p in problems:
                         print('   ', p)
+        for label, sus in suspect.items():
+            print(f'{label}: {len(sus)} rhythm suspect(s) -- check against the scan')
+            for x in sus:
+                print('   ', x)
         clean = len(results) - sum(1 for v in results.values() if v)
-        print(f'{clean}/{len(results)} files clean, {total} problem(s)')
+        print(f'{clean}/{len(results)} files clean, {total} problem(s)'
+              + (f', {sum(len(v) for v in suspect.values())} rhythm suspect(s)' if suspect else ''))
     return 1 if total else 0
 
 

@@ -1445,6 +1445,67 @@ def to_mscz(xml_path, mscz_path, musescore=None):
 # those passes happily on a bar full of invented dotted quarters. The only thing
 # that catches them is counting the ornaments before and after.
 
+def rhythm_suspects(path, min_support=3):
+    """Bars that look like a dot was dropped. SUSPICIONS, not violations.
+
+    A dropped dot is the one OMR rhythm error that survives every structural
+    check: the bar still adds up to its meter, so no length test fires, and the
+    file stays valid MusicXML. It has to be caught by shape instead. Two
+    independent signals, because each is blind where the other sees.
+
+    RESIDUE. Reading a dotted eighth as a plain eighth leaves a sixteenth of
+    the bar unaccounted for, and the export fills the gap with a rest at the
+    end of the bar. So a bar ending in a rest shorter than one beat is the
+    arithmetic footprint of a lost dot. Cheap and precise, but it only works
+    when the loss leaves a gap.
+
+    OUTLIER. A dotted-eighth-plus-sixteenth misread as two plain eighths fills
+    the beat EXACTLY -- no gap, no residue, nothing for the first signal to
+    find. What it does leave is a bar that no longer matches the habits of its
+    own piece. So: would restoring one dot turn this bar's rhythm into a
+    pattern the song already uses elsewhere? Requires min_support other bars
+    carrying the repaired pattern, because a bar of four plain eighths is
+    ordinary and would otherwise be flagged in every song that has one. At
+    min_support=3 this found five real errors in one book and no false ones;
+    at 1 it flagged correct bars of four eighths.
+
+    Neither signal proves anything -- both want checking against the scan. What
+    they buy is knowing WHICH bars to look at.
+    """
+    from collections import Counter
+
+    part = read_any(path).parts[0]
+    bars = []
+    for meas in part.getElementsByClass('Measure'):
+        ev = sorted(meas.notesAndRests, key=lambda z: float(z.offset))
+        bars.append((meas.number,
+                     tuple(round(float(x.duration.quarterLength), 4) for x in ev),
+                     tuple(bool(x.isRest) for x in ev)))
+    seen = Counter(rh for _, rh, _ in bars)
+
+    def repairs(rh):
+        """Rhythms this bar becomes if one dropped dot is restored."""
+        out = []
+        for i in range(len(rh) - 1):
+            if abs(rh[i] - 0.5) < 1e-9 and abs(rh[i + 1] - 0.5) < 1e-9:
+                out.append(rh[:i] + (0.75, 0.25) + rh[i + 2:])      # 8+8 -> 8.+16
+            if abs(rh[i] - 0.5) < 1e-9 and abs(rh[i + 1] - 0.25) < 1e-9:
+                out.append(rh[:i] + (0.75,) + rh[i + 1:])           # 8+16+gap -> 8.+16
+        return out
+
+    found = []
+    for num, rh, isrest in bars:
+        if isrest and isrest[-1] and 0 < rh[-1] < 0.5:
+            found.append(f'm{num}: ends with rest({rh[-1]:g}) -- residue of a dropped dot')
+            continue
+        for cand in repairs(rh):
+            if seen.get(cand, 0) >= min_support:
+                found.append(f'm{num}: {rh} -> {cand}, a pattern used '
+                             f'{seen[cand]}x elsewhere in this song')
+                break
+    return found
+
+
 def census_stream(part):
     """Count dotted and tuplet elements in an in-memory part."""
     dots = tuplets = 0

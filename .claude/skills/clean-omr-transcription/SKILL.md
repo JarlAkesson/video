@@ -51,6 +51,9 @@ scripts/verify_score.py out/*.mscz --max-voices 1
 files that went through another tool (a `.mscz` round trip, a manual edit).
 Both scripts exit non-zero on any problem, so they gate a loop.
 
+`verify_score.py` also prints **rhythm suspects** — bars where a dot was
+probably dropped. It names the bars; you settle them against the scan.
+
 ## What needs your eyes
 
 Five things no script can settle:
@@ -89,6 +92,16 @@ Five things no script can settle:
   `references/rare-repairs.md`. Never resolve it by deleting a note.
 - **`short`** — a bar under its meter outside the legal pickup/final positions.
   Usually a missed meter, not a missed note.
+- **`rhythm suspect`** — advisory, never gates. A dropped dot is the one rhythm
+  error that passes every structural check: the bar still fills its meter, so
+  nothing else can see it. Two signals catch it. *Residue*: a bar ending in a
+  rest shorter than a beat is the gap the missing dot left. *Outlier*: a bar
+  that would match a rhythm the song uses elsewhere if one dot were restored —
+  this is the only signal when a dotted-eighth-plus-sixteenth was read as two
+  eighths, which fills the beat exactly and leaves no gap. Both are guesses
+  about where to look, so open the scan for those bars; neither can confirm
+  anything on its own. `--rhythm-support N` sets how many other bars must carry
+  the repaired pattern (default 3; lower flags ordinary bars of four eighths).
 - **`rest in non-primary voice` / `print-object="no"`** — the file will
   reintroduce hidden rests on the next round trip. Re-run with one voice per
   staff; see `references/multi-part.md` for why voice numbering misleads here.
