@@ -56,6 +56,18 @@ probably dropped. It names the bars; you settle them against the scan.
 
 ## What needs your eyes
 
+**Never read pitch off a small crop.** Comparing noteheads to each other by eye
+turns a third into a second. Measure them against the staff lines:
+
+```bash
+scripts/read_staff.py book.pdf --page 10 --region 0.7,0.11,0.9,0.21 --key -1
+```
+
+It prints each notehead's diatonic step and warns when a staff space is under
+~60px (re-render larger) or a reading lands between two pitches. Rhythm is
+readable far smaller than pitch is, so a bar whose rhythm you have confirmed is
+**not** thereby pitch-confirmed — check the two separately, per bar.
+
 Five things no script can settle:
 
 1. **Reading the titles.** `find_title_bands.py` crops and stacks the bands;
