@@ -244,7 +244,7 @@ def analyse(path):
         r = inversion_ok(bass, is_inv, i, cad)
         (na if r is None else ok if r else bad).append(tag)
         j = chain_end(bass, i)
-        if is_inv[j]:
+        if j != i and is_inv[j]:      # j == i means no chain at all, not a failed landing
             land.append(f"{tag}>m{entries[j]['measure']}{entries[j]['chord_guess']}")
         if ((m21.pitch.Pitch(bass[i]).pitchClass - tonic) % 12 == 9
                 and chords[i].inversion() == 1
