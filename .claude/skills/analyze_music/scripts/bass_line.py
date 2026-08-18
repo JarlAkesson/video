@@ -31,6 +31,16 @@ Checks:
            degree 4 there for the stronger 1-4-5, and lets the melody's degree 4
            sound as a 3rd instead of doubling a root.
 
+  ct       OPPORTUNITY, not a fault. A tonic bar moving to ii whose melody
+           touches only the 3rd and 5th can take vii*7/ii instead, walking the
+           bass 1-#1-2 into the cadence. Those two notes are exactly what
+           vii*7/ii shares with I, so the melody stays diatonic and every
+           chromatic tone sits in the harmony -- which is why note-fit can
+           never propose the chord and it has to be offered explicitly. The
+           device is legal wherever this fires; on one 21-song book it fired
+           6 times where the composer used it twice, so the restraint is the
+           judgement and only the option is mechanical.
+
 Usage: bass_line.py FILES [--all] [--show] [--json]
 """
 
@@ -145,10 +155,43 @@ def melody_spans(score_path, entries):
     return spans, seq
 
 
-def parallels(score_path, entries, bass, is_inv):
-    if not score_path:
-        return []
-    spans, seq = melody_spans(score_path, entries)
+def chromatic_tonicisation(chords, tonic, entries, seq, meter):
+    """Bars where vii*7/ii is available but a plain tonic chord is written.
+
+    Preconditions: a root-position tonic (not the first chord, not already
+    diminished), the next chord is ii, the one after that is V, and every
+    strong-beat melody note under the tonic is its 3rd or 5th -- the two tones
+    vii*7/ii holds in common with I. See the module docstring for why this is
+    reported as an opportunity rather than a fault.
+    """
+    strong = [x + 1 for x in STRONG.get(meter, [0.0])]
+    def deg(name):
+        return (m21.pitch.Pitch(name).pitchClass - tonic) % 12
+    out = []
+    for i in range(1, len(chords) - 2):
+        c, nx, after = chords[i], chords[i + 1], chords[i + 2]
+        if c.inversion() or deg(c.root().name) != 0 or c.isDiminishedTriad():
+            continue
+        if deg(nx.root().name) != 2 or nx.quality != 'minor':
+            continue
+        if deg(after.root().name) != 7:
+            continue                                 # the device is cadential
+        lo = (entries[i]['measure'], entries[i]['beat'])
+        hi = (entries[i + 1]['measure'], entries[i + 1]['beat'])
+        notes = [e.pitches[0].name for m, b, e in seq
+                 if not e.isRest and lo <= (m, b) < hi
+                 and any(abs(b - x) < 1e-6 for x in strong)]
+        allowed = {q.name for q in c.pitches} - {c.root().name}
+        if notes and set(notes) <= allowed:
+            # the chromatic 1-#1-2 bass needs ii on its own root to land on
+            nb = '' if nx.inversion() == 0 else ' if ii goes to root position'
+            out.append(f"m{entries[i]['measure']} {entries[i]['chord_guess']}"
+                       f">{entries[i+1]['chord_guess']}: vii*7/ii available, "
+                       f"bass 1-#1-2{nb}")
+    return out
+
+
+def parallels(entries, bass, is_inv, spans, seq):
     out = []
     for k in range(len(entries) - 1):
         last, nxt = spans[k][1], spans[k + 1][0]
@@ -197,12 +240,18 @@ def analyse(path):
                 and chords[i].inversion() == 1 and chords[i].scaleDegree == 4):
             deg6.append(tag)
 
+    src = find_score(path)
+    spans, seq = melody_spans(src, entries) if src else ([(None, None)] * len(entries), [])
+    avail = chromatic_tonicisation(chords, tonic, entries, seq,
+                                   score.get('meter', '4/4')) if seq else []
+
     pen = (m21.pitch.Pitch(bass[-2]).pitchClass - tonic) % 12 if len(bass) >= 2 else None
     return {
         'file': os.path.basename(path).replace('_music_analysis.json', ''),
         'chords': len(bass), 'bass': bass, 'inversions': len(inv), 'inv_ok': ok,
         'inv_bad': bad, 'inv_na': na, 'chain_not_landed': land, 'deg6': deg6,
-        'parallels': parallels(find_score(path), entries, bass, is_inv),
+        'parallels': parallels(entries, bass, is_inv, spans, seq),
+        'available': avail,
         'cadence_ok': pen == 7,
     }
 
@@ -237,12 +286,14 @@ def main():
                 + [f'deg6 {x}' for x in r['deg6']])
         if bits:
             faults += 1
-        elif not args.all and not args.show:
+        elif not (args.all or args.show or r['available']):
             continue
         note = '; '.join(bits) or 'ok'
         if r['inv_na']:
             note += '  n/a ' + ','.join(r['inv_na'])
         print(f"{r['file'][7:][:26]:26s} {note}")
+        for a in r['available']:
+            print(f"{'':26s} ct {a}")
         if args.show:
             print('   ' + ' '.join(r['bass']))
     quiet = [r['file'][7:] for r in out if not r['cadence_ok']]
