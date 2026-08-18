@@ -63,8 +63,18 @@ def parse_key(text):
 
 
 def rn(symbol, key):
+    """Roman numeral, or a chord symbol read as one.
+
+    Analyses may hold a plain chord symbol where no numeral spells the chord --
+    a sus, or a seventh over a foreign pedal bass. Those still have a bass note
+    and still belong in the line, so read them rather than dropping them.
+    """
     try:
         return m21.roman.RomanNumeral(symbol, key)
+    except Exception:
+        pass
+    try:
+        return m21.harmony.ChordSymbol(symbol)
     except Exception:
         return None
 
@@ -237,7 +247,8 @@ def analyse(path):
         if is_inv[j]:
             land.append(f"{tag}>m{entries[j]['measure']}{entries[j]['chord_guess']}")
         if ((m21.pitch.Pitch(bass[i]).pitchClass - tonic) % 12 == 9
-                and chords[i].inversion() == 1 and chords[i].scaleDegree == 4):
+                and chords[i].inversion() == 1
+                and getattr(chords[i], 'scaleDegree', None) == 4):
             deg6.append(tag)
 
     src = find_score(path)
