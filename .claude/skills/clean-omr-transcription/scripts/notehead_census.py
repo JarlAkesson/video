@@ -89,12 +89,20 @@ def vocal_staves(path, page):
     be a multiple of three. The ink threshold is swept until it is, because one
     missed staff silently shifts which staff is taken to be the vocal line.
     """
-    for thr in (0.70, 0.62, 0.55, 0.48, 0.80, 0.42):
+    best, best_thr = [], None
+    for thr in (0.80, 0.70, 0.62, 0.55, 0.48, 0.42, 0.35, 0.30):
         st = staves(path, page, thr=thr)
-        if st and len(st) % 3 == 0:
-            return st[::3], thr
-    st = staves(path, page)
-    return (st[:1] if st else []), None
+        # Take the MOST staves any threshold finds, not the first count that
+        # happens to divide by three: a page of two systems that is half
+        # detected gives three staves, which passes the test just as well as
+        # the correct six and then silently drops a whole system.
+        if st and len(st) % 3 == 0 and len(st) > len(best):
+            best, best_thr = st, thr
+    if best:
+        return best[::3], best_thr
+    st = max((staves(path, page, thr=t) for t in (0.70, 0.55, 0.42, 0.35)),
+             key=len, default=[])
+    return st, None                       # not a multiple of three: hand back all of them
 
 
 def count_on(path, page, y0, y1, dpi=700, x0=0.135, x1=0.97):
