@@ -1469,8 +1469,15 @@ def rhythm_suspects(path, min_support=3):
     min_support=3 this found five real errors in one book and no false ones;
     at 1 it flagged correct bars of four eighths.
 
-    Neither signal proves anything -- both want checking against the scan. What
-    they buy is knowing WHICH bars to look at.
+    RATIO. A note four times the following sixteenth. A sixteenth normally
+    follows a dotted note; a ratio of four means a dot was lost, or a note
+    between the two was dropped and its time absorbed by the note before it.
+    Across one 18-song book this fires three times, so it is nearly all signal.
+
+    None of these prove anything -- all want checking against the scan. What
+    they buy is knowing WHICH bars to look at. And none of them can see a note
+    that was dropped without disturbing the rhythm around it: for that, compare
+    the number of noteheads on the page against the number in the file.
     """
     from collections import Counter
 
@@ -1495,6 +1502,16 @@ def rhythm_suspects(path, min_support=3):
 
     found = []
     for num, rh, isrest in bars:
+        # A note four times the next one, where the next is a sixteenth. In this
+        # idiom a sixteenth follows a DOTTED note (ratio 3) or another short
+        # note; a ratio of 4 means either the dot was lost or a note between
+        # them was dropped and its time absorbed by the note before it. Both
+        # leave the bar summing correctly, so nothing else can see them.
+        if any(not isrest[i] and not isrest[i + 1] and rh[i + 1] <= 0.25
+               and rh[i] / rh[i + 1] >= 4 for i in range(len(rh) - 1)):
+            found.append(f'm{num}: {rh} -- a 16th here follows a note 4x its length; '
+                         f'a 16th should follow a DOTTED note, so a dot or a note is missing')
+            continue
         if isrest and isrest[-1] and 0 < rh[-1] < 0.5:
             found.append(f'm{num}: ends with rest({rh[-1]:g}) -- residue of a dropped dot')
             continue
