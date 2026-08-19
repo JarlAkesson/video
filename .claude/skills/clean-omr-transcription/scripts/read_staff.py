@@ -221,56 +221,6 @@ def components(mask):
     return list(out.values())
 
 
-def detect_key(dark, fits, space, clef='treble'):
-    """Read the key signature off the page: (count, 'sharp'|'flat'|None).
-
-    Glyph shape is not worth recognising here. The accidentals of a key
-    signature sit at FIXED staff positions, and the first one alone settles
-    which kind they are: in treble a sharp signature opens on the top line
-    (F#5) and a flat signature on the middle line (Bb4), four steps apart.
-    So count the glyphs and measure where the leftmost one sits.
-
-    This exists because every other check in the skill takes the key as an
-    argument and therefore inherits whatever the transcription already
-    believes. A key read off the page is the only one that can disagree --
-    and a wrong key signature is invisible to a comparison made in staff
-    steps, since Bb and B natural occupy the same line.
-    """
-    FIRST = {'treble': {'sharp': 8, 'flat': 4}, 'bass': {'sharp': 6, 'flat': 2}}
-    W = dark.shape[1]
-    y_at = lambda f, x: f[0] * x + f[1]                                  # noqa: E731
-    clean = strip_lines(dark, fits, space)
-    comps = components(clean)
-    # the clef is by far the tallest thing at the head of the staff
-    clef_right = 0
-    for ymin, ymax, xmin, xmax, _a in comps:
-        if (ymax - ymin + 1) / space > 4.0 and xmin < W * 0.35:
-            clef_right = max(clef_right, xmax)
-    glyphs = []
-    for ymin, ymax, xmin, xmax, _a in comps:
-        w, h = (xmax - xmin + 1) / space, (ymax - ymin + 1) / space
-        if not (0.30 <= w <= 1.25 and 1.45 <= h <= 3.30 and h / w >= 1.8):
-            continue                                 # sharps and flats are tall and narrow
-        if xmin <= clef_right or xmin > W * 0.55:
-            continue
-        step = (y_at(fits[-1], (xmin + xmax) / 2) - (ymin + ymax) / 2) / (space / 2)
-        if not (-0.5 <= step <= 10.5):
-            continue                                 # a signature stays around the staff
-        glyphs.append((xmin, step))
-    if not glyphs:
-        return 0, None
-    glyphs.sort()
-    kept = [glyphs[0]]
-    for x, st in glyphs[1:]:
-        if x - kept[-1][0] > space * 2.0:
-            break                                    # the time signature follows a gap
-        kept.append((x, st))
-    first = kept[0][1]
-    want = FIRST[clef]
-    kind = 'sharp' if abs(first - want['sharp']) < abs(first - want['flat']) else 'flat'
-    return len(kept), kind
-
-
 def name_of(step, clef, key):
     d = BOTTOM_LINE[clef] + step
     letter = LETTERS[d % 7]

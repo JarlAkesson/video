@@ -56,6 +56,13 @@ probably dropped. It names the bars; you settle them against the scan.
 
 ## What needs your eyes
 
+**Read the key signature off the page yourself, once per song, before anything
+else.** Never inherit it from the OMR output. It is a single glance at the front
+of the first system, and getting it wrong is silent: `read_staff` is *given* the
+key, so it cannot disagree, and a comparison in staff steps cannot either, since
+Bb and B natural sit on the same line. One wrong signature quietly rewrites every
+affected note in the piece and everything built on it.
+
 **Never read pitch off a small crop.** Comparing noteheads to each other by eye
 turns a third into a second. Measure them against the staff lines:
 
