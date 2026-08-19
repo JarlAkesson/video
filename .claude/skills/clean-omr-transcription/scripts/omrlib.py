@@ -1446,38 +1446,45 @@ def to_mscz(xml_path, mscz_path, musescore=None):
 # that catches them is counting the ornaments before and after.
 
 def rhythm_suspects(path, min_support=3):
-    """Bars that look like a dot was dropped. SUSPICIONS, not violations.
+    """Bars that look like a note was mis-read. SUSPICIONS, not violations.
 
-    A dropped dot is the one OMR rhythm error that survives every structural
-    check: the bar still adds up to its meter, so no length test fires, and the
-    file stays valid MusicXML. It has to be caught by shape instead. Two
-    independent signals, because each is blind where the other sees.
+    These errors survive every structural check: the bar still adds up to its
+    meter, so no length test fires, and the file stays valid MusicXML. They have
+    to be caught by shape instead. Four checks, each blind where another sees.
 
-    RESIDUE. Reading a dotted eighth as a plain eighth leaves a sixteenth of
-    the bar unaccounted for, and the export fills the gap with a rest at the
-    end of the bar. So a bar ending in a rest shorter than one beat is the
-    arithmetic footprint of a lost dot. Cheap and precise, but it only works
-    when the loss leaves a gap.
+    RATIO. A note four times the length of the sixteenth that follows it. A
+    sixteenth normally follows a DOTTED note (ratio 3), so a ratio of 4 means a
+    dot was lost, or a note between the two was dropped and its time absorbed by
+    the note before it. The most precise of the four: on one 18-song book it
+    fired four times and every one was a real error.
+
+    PADDING. A rest of a quarter or three-quarter beat straight after a note.
+    That is the footprint of a note read too short with the leftover filled in,
+    and it can sit anywhere in the bar -- "D5(0.25) D4(1) rest(0.75) rest(1)"
+    for a bar that is really "D5(1) D4(1) rest(1)". Rests in this idiom are
+    whole beats, half beats or whole bars; 0.25 and 0.75 are arithmetic rather
+    than music. Zero false positives across that same book.
+
+    RESIDUE. The same idea at the END of a bar, for rests too short to be
+    musical. Reading a dotted eighth as a plain eighth leaves a sixteenth
+    unaccounted for and the export parks a rest there. Cheap and precise, but it
+    only works when the loss leaves a gap.
 
     OUTLIER. A dotted-eighth-plus-sixteenth misread as two plain eighths fills
-    the beat EXACTLY -- no gap, no residue, nothing for the first signal to
-    find. What it does leave is a bar that no longer matches the habits of its
-    own piece. So: would restoring one dot turn this bar's rhythm into a
-    pattern the song already uses elsewhere? Requires min_support other bars
-    carrying the repaired pattern, because a bar of four plain eighths is
-    ordinary and would otherwise be flagged in every song that has one. At
-    min_support=3 this found five real errors in one book and no false ones;
-    at 1 it flagged correct bars of four eighths.
-
-    RATIO. A note four times the following sixteenth. A sixteenth normally
-    follows a dotted note; a ratio of four means a dot was lost, or a note
-    between the two was dropped and its time absorbed by the note before it.
-    Across one 18-song book this fires three times, so it is nearly all signal.
+    the beat EXACTLY -- no gap, no residue, nothing for the other three to find.
+    What it does leave is a bar that no longer matches the habits of its own
+    piece. So: would restoring one dot turn this bar's rhythm into a pattern the
+    song already uses elsewhere? min_support other bars must carry the repaired
+    pattern, because a bar of four plain eighths is ordinary and would otherwise
+    be flagged in every song containing one. At min_support=3 this found five
+    real errors in one book; at 1 it flagged correct bars of four eighths.
 
     None of these prove anything -- all want checking against the scan. What
-    they buy is knowing WHICH bars to look at. And none of them can see a note
-    that was dropped without disturbing the rhythm around it: for that, compare
-    the number of noteheads on the page against the number in the file.
+    they buy is knowing WHICH bars to look at. And none can see a note dropped
+    without disturbing the rhythm around it: a run read as one long note leaves
+    a bar that is correct in every respect except how many notes it holds.
+    Counting noteheads on the page is the only thing that sees that, and doing
+    it per bar rather than per song is what makes the answer worth acting on.
     """
     from collections import Counter
 
@@ -1511,6 +1518,18 @@ def rhythm_suspects(path, min_support=3):
                and rh[i] / rh[i + 1] >= 4 for i in range(len(rh) - 1)):
             found.append(f'm{num}: {rh} -- a 16th here follows a note 4x its length; '
                          f'a 16th should follow a DOTTED note, so a dot or a note is missing')
+            continue
+        # A rest of a quarter- or three-quarter beat straight after a note. That
+        # is the footprint of a note that was read too short and the leftover
+        # padded with a rest -- and unlike the bar-end case it can sit anywhere,
+        # which is how "D5(0.25) rest(0.75) ..." slipped past a check that only
+        # looked at the last event. Rests in this idiom are whole beats, half
+        # beats, or whole bars; 0.25 and 0.75 are arithmetic, not music.
+        if any(not isrest[i] and isrest[i + 1] and rh[i + 1] in (0.25, 0.75)
+               for i in range(len(rh) - 1)):
+            found.append(f'm{num}: {rh} -- a rest of a quarter or three-quarter beat '
+                         f'follows a note; the note was probably read too short and '
+                         f'the remainder padded')
             continue
         if isrest and isrest[-1] and 0 < rh[-1] < 0.5:
             found.append(f'm{num}: ends with rest({rh[-1]:g}) -- residue of a dropped dot')
