@@ -29,7 +29,13 @@ Checks:
 
   deg6     IV6 puts degree 6 in the bass, giving 1-6-5 into a cadence. ii6 puts
            degree 4 there for the stronger 1-4-5, and lets the melody's degree 4
-           sound as a 3rd instead of doubling a root.
+           sound as a 3rd instead of doubling a root. But that preference
+           assumes ii6's bass note is USABLE. Where degree 4 in the bass is
+           itself the problem -- because it would double the melody in perfect
+           fifths or octaves -- ii6 fails for exactly the reason root-position
+           IV does, and IV6's degree 6 becomes the right answer rather than a
+           fault. The check tests that substitution first and stays quiet when
+           it would not work.
 
   ct       OPPORTUNITY, not a fault. A tonic bar moving to ii whose melody
            touches only the 3rd and 5th can take vii*7/ii instead, walking the
@@ -225,6 +231,41 @@ def parallels(entries, bass, is_inv, spans, seq):
     return out
 
 
+def perfect_parallel(b1, b2, n1, n2):
+    """Would bass b1->b2 under melody n1->n2 make parallel fifths or octaves?"""
+    if n1 is None or n2 is None or b1 == b2:
+        return False
+    i1 = (n1.pitchClass - m21.pitch.Pitch(b1).pitchClass) % 12
+    i2 = (n2.pitchClass - m21.pitch.Pitch(b2).pitchClass) % 12
+    if i1 != i2 or i1 not in PERFECT:
+        return False
+    dm = n2.midi - n1.midi
+    return dm != 0 and (signed_step(b1, b2) > 0) == (dm > 0)
+
+
+def ii6_usable(key, bass, spans, i):
+    """Could ii6 stand in for the IV6 at index i, or is its bass note the problem?
+
+    deg6 prefers ii6 because it puts scale degree 4 in the bass. That is worth
+    nothing if degree 4 is exactly what would double the melody in fifths --
+    which is often the reason IV6 was reached for to begin with. Test the
+    substitution on both sides before objecting to what is already written.
+    """
+    four = key.pitchFromDegree(4)
+    if four is None:
+        return True
+    alt = four.name
+    prev_last = spans[i - 1][1][2] if i > 0 and spans[i - 1][1] else None
+    here_first = spans[i][0][2] if spans[i][0] else None
+    here_last = spans[i][1][2] if spans[i][1] else None
+    next_first = spans[i + 1][0][2] if i + 1 < len(bass) and spans[i + 1][0] else None
+    if i > 0 and perfect_parallel(bass[i - 1], alt, prev_last, here_first):
+        return False
+    if i + 1 < len(bass) and perfect_parallel(alt, bass[i + 1], here_last, next_first):
+        return False
+    return True
+
+
 def analyse(path):
     score = json.load(open(path, encoding='utf-8'))['score']
     key = parse_key(score['key'])
@@ -237,6 +278,11 @@ def analyse(path):
     is_inv = [c.inversion() != 0 for c in chords]
     inv = [i for i, v in enumerate(is_inv) if v]
 
+    # the melody is needed before the inversion loop: deg6 tests whether ii6's
+    # bass note would double it in fifths before objecting to an IV6
+    src = find_score(path)
+    spans, seq = melody_spans(src, entries) if src else ([(None, None)] * len(entries), [])
+
     cad = {i for i in inv if cadential_64(chords, bass, tonic, i)}
     ok, bad, na, land, deg6 = [], [], [], [], []
     for i in inv:
@@ -248,11 +294,10 @@ def analyse(path):
             land.append(f"{tag}>m{entries[j]['measure']}{entries[j]['chord_guess']}")
         if ((m21.pitch.Pitch(bass[i]).pitchClass - tonic) % 12 == 9
                 and chords[i].inversion() == 1
-                and getattr(chords[i], 'scaleDegree', None) == 4):
+                and getattr(chords[i], 'scaleDegree', None) == 4
+                and ii6_usable(key, bass, spans, i)):
             deg6.append(tag)
 
-    src = find_score(path)
-    spans, seq = melody_spans(src, entries) if src else ([(None, None)] * len(entries), [])
     avail = chromatic_tonicisation(chords, tonic, entries, seq,
                                    score.get('meter', '4/4')) if seq else []
 
