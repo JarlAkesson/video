@@ -12,8 +12,10 @@ Three things it has to get right, all learned from getting them wrong:
   * Noteheads are CONNECTED to the staff lines running through them, so naive
     blob-finding merges a whole system into one component. They are isolated
     instead by requiring a solid dark run of about half a staff space in BOTH
-    directions: stems fail the horizontal test, staff lines and beams fail the
-    vertical one, only noteheads pass both.
+    directions: stems fail the horizontal test, staff lines fail the vertical
+    one, only noteheads pass both. A thick beam can pass both, so anything
+    wider than two staff spaces is rejected as well -- a beam spans the gap
+    between two stems, a notehead never does.
 
   * Scans SKEW. Each staff line is fitted as a function of x rather than taken
     as one y, because a global average drifts by a third of a step or more by
@@ -85,11 +87,22 @@ def erode(mask, k, axis):
     return out if axis == 1 else out.T
 
 
-def staff_lines(dark):
-    """Fit the five staff lines as y = a*x + b each, tolerating scan skew."""
+def staff_lines(dark, thr=None):
+    """Fit the five staff lines as y = a*x + b each, tolerating scan skew.
+
+    The ink threshold is swept rather than fixed: a faint or short staff drops
+    below any single cutoff, and a region that finds one line is indistinguish-
+    able from a region with no staff at all.
+    """
+    if thr is None:
+        for t in (0.55, 0.45, 0.35, 0.28, 0.65, 0.22):
+            fits, err = staff_lines(dark, t)
+            if not err:
+                return fits, None
+        return None, 'no staff found at any threshold -- adjust --region'
     H, W = dark.shape
     rows = dark.sum(axis=1)
-    cand = [i for i, v in enumerate(rows) if v > 0.55 * W]
+    cand = [i for i, v in enumerate(rows) if v > thr * W]
     groups = []
     for i in cand:
         if groups and i - groups[-1][-1] <= max(2, H // 200):
@@ -121,6 +134,91 @@ def staff_lines(dark):
                 ys.append(max(0, lo) + col.mean())
         fits.append(np.polyfit(xs, ys, 1) if len(xs) > 5 else np.array([0.0, cy]))
     return fits, None
+
+
+def strip_lines(dark, fits, space):
+    """Erase the staff lines, keeping the ink that belongs to symbols.
+
+    Without this the centroid of a notehead is dragged toward whichever staff
+    line grazes it -- a bias of about a third of a half-step, which is enough to
+    read an E as an F#. A pixel is erased only if it sits on a fitted line AND
+    its vertical dark run is thin enough to BE a line: notehead and stem pixels
+    have taller runs and survive.
+    """
+    out = dark.copy()
+    H, W = dark.shape
+    vr = np.zeros(H, np.int32)
+    thick = max(1, int(round(space * 0.16)))
+    for x in range(W):
+        col = dark[:, x]
+        if not col.any():
+            continue
+        runs = np.zeros(H, np.int32)
+        y = 0
+        while y < H:
+            if col[y]:
+                z = y
+                while z < H and col[z]:
+                    z += 1
+                runs[y:z] = z - y
+                y = z
+            else:
+                y += 1
+        for f in fits:
+            ly = int(round(f[0] * x + f[1]))
+            lo, hi = max(0, ly - thick), min(H, ly + thick + 1)
+            seg = slice(lo, hi)
+            out[seg, x] &= ~(runs[seg] <= thick * 2 + 1)
+    return out
+
+
+def components(mask):
+    """Connected components of `mask`, as (ymin, ymax, xmin, xmax, area).
+
+    Grouping by column instead merges a whole beamed group into one blob,
+    because the beam occupies every column between its noteheads -- which is
+    exactly how beamed pairs were being lost. Runs are unioned row by row so
+    this stays fast on a mask that is mostly empty.
+    """
+    H, W = mask.shape
+    runs, byrow = [], {}
+    for r in range(H):
+        row = mask[r]
+        if not row.any():
+            continue
+        x = 0
+        while x < W:
+            if row[x]:
+                x0 = x
+                while x < W and row[x]:
+                    x += 1
+                byrow.setdefault(r, []).append(len(runs))
+                runs.append((r, x0, x - 1))
+            else:
+                x += 1
+    parent = list(range(len(runs)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for r in sorted(byrow):
+        for i in byrow[r]:
+            for j in byrow.get(r - 1, []):
+                if runs[i][1] <= runs[j][2] and runs[j][1] <= runs[i][2]:
+                    a, b = find(i), find(j)
+                    if a != b:
+                        parent[b] = a
+    out = {}
+    for idx, (r, x0, x1) in enumerate(runs):
+        k = find(idx)
+        b = out.setdefault(k, [H, 0, W, 0, 0])
+        b[0] = min(b[0], r); b[1] = max(b[1], r)
+        b[2] = min(b[2], x0); b[3] = max(b[3], x1)
+        b[4] += x1 - x0 + 1
+    return list(out.values())
 
 
 def name_of(step, clef, key):
@@ -168,26 +266,21 @@ def main():
         print(f'*** {space:.0f}px per space is below {args.min_space:.0f} -- '
               f'RE-RENDER LARGER before trusting any pitch below', file=sys.stderr)
 
+    clean = strip_lines(dark, fits, space)
     k = max(1, int(round(space * 0.27)))
-    head = erode(dark, k, 1) & erode(dark, k, 0)
-    cols = head.sum(axis=0)
-    groups, cur = [], None
-    for i, v in enumerate(cols):
-        if v:
-            cur = [i, i] if cur is None else [cur[0], i]
-        else:
-            if cur and cur[1] - cur[0] >= space * 0.45:
-                groups.append(tuple(cur))
-            cur = None
-    if cur and cur[1] - cur[0] >= space * 0.45:
-        groups.append(tuple(cur))
+    head = erode(clean, k, 1) & erode(clean, k, 0)
+    blobs = []
+    for ymin, ymax, xmin, xmax, area in components(head):
+        w, h = (xmax - xmin + 1) / space, (ymax - ymin + 1) / space
+        if not (0.40 <= w <= 1.45 and 0.30 <= h <= 1.25):
+            continue                                 # beams are wide and flat
+        blobs.append(((xmin + xmax) / 2, (ymin + ymax) / 2))
+    blobs.sort()
 
-    print(f'{len(groups)} notehead(s)')
+    print(f'{len(blobs)} notehead(s)')
     shaky = 0
-    for x0, x1 in groups:
-        ys, xs = np.nonzero(head[:, x0:x1 + 1])
-        cx = x0 + xs.mean()
-        step = (y_at(fits[-1], cx) - ys.mean()) / (space / 2)
+    for cx, cy in blobs:
+        step = (y_at(fits[-1], cx) - cy) / (space / 2)
         frac = abs(step - round(step))
         flag = '  <-- BETWEEN TWO PITCHES, re-render larger' if frac > 0.28 else ''
         if flag:
