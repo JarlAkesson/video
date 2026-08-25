@@ -36,7 +36,9 @@ scripts/fix_pdf_geometry.py book.pdf -o book_fixed.pdf   # if it says REBUILD
 # 2. Find where each song starts (see "What needs your eyes")
 scripts/find_title_bands.py book.pdf --out /tmp/bands --first-page 4
 
-# 3. Run Audiveris per song range (sheet2xml, or -sheets N-M on an .omr)
+# 3. Run Audiveris per song range (sheet2xml, or -sheets N-M on an .omr).
+#    Keep the .omr and raw exports NEXT TO THE BOOK, not in a session
+#    scratchpad -- it is ~10 min of CPU and scratch gets wiped.
 
 # 4. Clean each raw export
 scripts/normalize_measures.py raw/*.mxl --out-dir out --melody-only \
@@ -54,15 +56,22 @@ Both scripts exit non-zero on any problem, so they gate a loop.
 `verify_score.py` also prints **rhythm suspects** — bars where a dot was
 probably dropped. It names the bars; you settle them against the scan.
 
+Check any advisory's precision before investigating a single flag. If its
+false positives outnumber its true ones — clef blobs, open noteheads, text
+above the staff, accidental spellings — suppress those classes first. Chasing
+a noisy checker costs more than fixing it.
+
 **For a melody-only job, crop the melody staff out and run Audiveris on that**
 — `scripts/melody_staves.py book.pdf --pages 15-17 -o mel.pdf`, one system per
-page. The accompaniment is what scrambles part assignment: a grand staff below
-the vocal line makes Audiveris hand measures to the wrong part, silently drop a
-page, or die outright (`Denominator is zero` at every resolution, clean once the
-piano was gone). Worth running as a second pass even when the full-page route
-works — two readings of the same staves disagree only where one is wrong, so
-every difference is a bar to open the scan on. Diff them by note sequence, not
-bar number: one disagreement about a pickup shifts every later bar.
+page (leave `--dpi` alone; Audiveris refuses images over 20M pixels). The
+accompaniment is what scrambles part assignment: a grand staff below the vocal
+line makes Audiveris hand measures to the wrong part, silently drop a page, or
+die outright (`Denominator is zero` at every resolution, clean once the piano
+was gone). Settle the route on ONE song run both ways before committing a whole
+book to either, then keep the loser as a second pass: two readings of the same
+staves disagree only where one is wrong, so every difference is a bar to open
+the scan on. Diff them by note sequence, not bar number — one disagreement
+about a pickup shifts every later bar.
 
 ## What needs your eyes
 
@@ -90,6 +99,13 @@ It prints each notehead's diatonic step and warns when a staff space is under
 ~60px (re-render larger) or a reading lands between two pitches. Rhythm is
 readable far smaller than pitch is, so a bar whose rhythm you have confirmed is
 **not** thereby pitch-confirmed — check the two separately, per bar.
+
+**Match the instrument to the question.** They run cheapest to dearest: bar
+arithmetic, then a diff of two independent runs, then measurement, then a
+rendered image. An image is the wrong tool for a pitch — measure it instead;
+the detector is the wrong tool for a dot, a flag or a rest — look at those.
+Never render blind: derive the crop window from a measurement first, or you
+will render the same bar three times before it is legible.
 
 Five things no script can settle:
 
