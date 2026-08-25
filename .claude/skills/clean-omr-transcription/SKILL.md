@@ -54,6 +54,16 @@ Both scripts exit non-zero on any problem, so they gate a loop.
 `verify_score.py` also prints **rhythm suspects** — bars where a dot was
 probably dropped. It names the bars; you settle them against the scan.
 
+**For a melody-only job, crop the melody staff out and run Audiveris on that**
+— `scripts/melody_staves.py book.pdf --pages 15-17 -o mel.pdf`, one system per
+page. The accompaniment is what scrambles part assignment: a grand staff below
+the vocal line makes Audiveris hand measures to the wrong part, silently drop a
+page, or die outright (`Denominator is zero` at every resolution, clean once the
+piano was gone). Worth running as a second pass even when the full-page route
+works — two readings of the same staves disagree only where one is wrong, so
+every difference is a bar to open the scan on. Diff them by note sequence, not
+bar number: one disagreement about a pickup shifts every later bar.
+
 ## What needs your eyes
 
 **Read the key signature off the page yourself, once per song, before anything
@@ -69,6 +79,12 @@ turns a third into a second. Measure them against the staff lines:
 ```bash
 scripts/read_staff.py book.pdf --page 10 --region 0.7,0.11,0.9,0.21 --key -1
 ```
+
+**A staff engraved in dyads needs `read_dyads.py` instead.** Two noteheads a
+third apart touch, and the merged blob fails `read_staff`'s height test — so
+most of a duet silently fails to appear, as absent notes rather than an error.
+`read_dyads.py` splits those blobs and prints each stack highest-first, which is
+also how you recover the two parts: upper voice, lower voice.
 
 It prints each notehead's diatonic step and warns when a staff space is under
 ~60px (re-render larger) or a reading lands between two pitches. Rhythm is
