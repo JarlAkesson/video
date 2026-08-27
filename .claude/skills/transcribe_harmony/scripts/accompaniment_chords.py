@@ -39,6 +39,24 @@ Tegner's "Sjung med oss, mamma!":
     A7 and C#m7b5 share three tones. What separates them is that one is the
     key's secondary dominant and the other belongs to no related key.
 
+Naming rules, each of which was wrong once and corrected against the page:
+
+  * A diminished triad on the leading tone is the DOMINANT SEVENTH without its
+    root -- D#-F#-A in E major is B7, which is how a keyboard voices it. Naming
+    it vii-diminished splits one harmony in two and loses the function.
+  * The bass is the lowest note sounding AT a window's start, and an inversion
+    is reported only when that bass HOLDS. A left hand rocking between two chord
+    tones is figuration; calling it an inversion mislabels every such bar.
+  * A seventh that is simply not restruck does not turn G7 back into G. Same
+    root means the harmony has not moved.
+  * A window with too few notes to pick a chord continues the harmony already
+    sounding, unless what is there contradicts it. Two notes cannot name a
+    chord out of the air.
+  * Ties break toward the TONAL CENTRE. Two chords often cover a window equally
+    and differ only in which tone they omit -- E and C#m both fit a bare E-G#.
+    Without this a piece keeps being read into its relative minor.
+  * Roots are spelled the way the key spells them: D# in E major, not Eb.
+
 Every chord is reported with a FIT score. Low fit means the window did not
 spell a chord cleanly -- open those bars against the source rather than
 trusting them, and note that a wrong-but-related chord (the relative minor,
@@ -76,7 +94,7 @@ QUALITIES = {
     'm7b5':  (0, 3, 6, 10),
 }
 
-SPLIT_PENALTY = 0.5      # cost of each extra chord within a bar
+SPLIT_PENALTY = 0.35     # cost of each extra chord within a bar
 PEDAL_WEIGHT = 0.35      # how much a held bass still counts toward naming
 FIFTHS = {'F': -1, 'C': 0, 'G': 1, 'D': 2, 'A': 3, 'E': 4, 'B': 5}
 
@@ -179,7 +197,11 @@ def key_bias(root, qual, key):
     want = ({1: '', 2: 'm', 3: 'm', 4: '', 5: '', 6: 'm', 7: 'dim'} if key.mode == 'major'
             else {1: 'm', 2: 'dim', 3: '', 4: 'm', 5: '', 6: '', 7: ''})
     if qual == want.get(degrees[root]):
-        return 1.5
+        # graded by distance from the tonic, not flat. Two chords often cover a
+        # window equally and differ only in which tone they omit -- E and C#m
+        # both fit a bare E-G#. The tie has to break toward the tonal centre,
+        # or a piece keeps being read into its relative minor.
+        return {1: 1.8, 5: 1.6, 4: 1.5, 6: 1.3, 2: 1.3, 3: 1.1, 7: 1.1}[degrees[root]]
     if qual in ('', '7'):
         return 0.8               # a secondary dominant on a diatonic degree
     return 0.0
@@ -211,32 +233,65 @@ def score_chord(weight, bass, prev_root=None, key=None):
     return best
 
 
-def segment(measures, span, beat, key, prev_root=None, max_spans=3):
+def segment(measures, span, beat, key, prev_chord=None, max_spans=3):
     """[(offset, root, quality, bass, fit)] for the best beat-aligned split."""
     nbeats = max(1, int(round(span / beat)))
     cuts = list(range(1, nbeats))
+    prev_root = prev_chord[0] if prev_chord else None
     ped = pedal_pc(measures, span)
+    if ped is not None:
+        # A pedal is a bass that holds WHILE THE HARMONY MOVES ABOVE IT. A bass
+        # simply sitting on its own root is not one, and treating it as such
+        # down-weighted the root and handed the bar to the relative minor.
+        w_all, b_all = pool(measures, 0.0, span)
+        if w_all and score_chord(w_all, b_all, prev_root, key)[0] == ped:
+            ped = None
     best = None
     for k in range(0, min(max_spans, nbeats)):
         for combo in combinations(cuts, k):
             bounds = [0.0] + [c * beat for c in combo] + [span]
-            segs, tot, prev = [], 0.0, prev_root
+            segs, tot, prev = [], 0.0, prev_chord
             for lo, hi in zip(bounds, bounds[1:]):
                 w, b = pool(measures, lo, hi)
                 if not w:
                     segs.append((lo, None))
                     continue
+                if len(w) < 3 and prev is not None:
+                    # Too few notes to pick a chord out of the air. If what is
+                    # there fits the harmony already sounding, it is a passing
+                    # moment inside it; only if it contradicts that harmony is
+                    # it worth naming, which is what stops invented chords
+                    # without silencing real ones.
+                    tones = {(prev[0] + i) % 12 for i in QUALITIES[prev[1]]}
+                    if set(w) <= tones:
+                        segs.append((lo, None))
+                        continue
                 if ped is not None and len(w) > 2:
                     w = dict(w)
                     w[ped] *= PEDAL_WEIGHT
-                root, qual, bs, sc = score_chord(w, b if ped is None else None, prev, key)
+                root, qual, bs, sc = score_chord(
+                    w, b if ped is None else None, prev[0] if prev else None, key)
                 segs.append((lo, (root, qual, ped if ped is not None else bs, sc)))
                 tot += sc * (hi - lo) / span
-                prev = root
+                prev = (root, qual)
             tot -= SPLIT_PENALTY * k
             if best is None or tot > best[0]:
                 best = (tot, segs)
     return [(lo,) + got for lo, got in best[1] if got is not None]
+
+
+def as_dominant(root, qual, key):
+    """Re-read a leading-tone diminished triad as the dominant seventh.
+
+    D#-F#-A in E major is not its own chord: it is B7 with the root left out,
+    which is how a keyboard voices the dominant. Naming it vii-diminished
+    splits one harmony into two and loses the function.
+    """
+    if qual != 'dim':
+        return root, qual
+    if (root - key.pitchFromDegree(7).pitchClass) % 12 == 0:
+        return key.pitchFromDegree(5).pitchClass, '7'
+    return root, qual
 
 
 def analyse(melody, accomp, ts, key, bar_offset=0):
@@ -253,8 +308,8 @@ def analyse(melody, accomp, ts, key, bar_offset=0):
             continue
         ms = per[num]
         span = max(m.barDuration.quarterLength for m in ms)
-        for lo, root, qual, bs, sc in segment(ms, span, beat, key,
-                                              prev[0] if prev else None):
+        for lo, root, qual, bs, sc in segment(ms, span, beat, key, prev):
+            root, qual = as_dominant(root, qual, key)
             if prev and root == prev[0]:
                 # same root: the harmony has not moved. A seventh that is simply
                 # not restruck in this window does not turn G7 back into G, so
@@ -263,6 +318,17 @@ def analyse(melody, accomp, ts, key, bar_offset=0):
             out.append((num + bar_offset, lo / beat + 1, root, qual, bs, sc))
             prev = (root, qual)
     return out
+
+
+def spell(pc, key):
+    """Name a pitch class the way the key spells it -- D# in E major, not Eb."""
+    for step in key.getScale().getPitches('C0', 'B0'):
+        if step.pitchClass == pc:
+            return step.name
+    p = m21.pitch.Pitch(pc)
+    if key.sharps > 0 and p.name.endswith('-'):
+        p = p.getEnharmonic()
+    return p.name
 
 
 # ------------------------------------------------------------------- reports
@@ -482,8 +548,8 @@ def main():
     print(f'{os.path.basename(args.score)}: {args.key}, {ts.ratioString}, '
           f'{len(rows)} chord(s), melody part "{melody.id}"')
     for bar, bt, root, qual, bs, sc in rows:
-        name = m21.pitch.Pitch(root).name + qual
-        slash = f'/{m21.pitch.Pitch(bs).name}' if bs is not None and bs != root else ''
+        name = spell(root, key) + qual
+        slash = f'/{spell(bs, key)}' if bs is not None and bs != root else ''
         mark = '   <-- weak, check the source' if sc < 8 else ''
         print(f'  m{bar:<3d} beat {bt:<4g} {name}{slash:<4s}  fit {sc}{mark}')
 
@@ -500,9 +566,9 @@ def main():
         rc = 1 if stranded else 0
 
     if args.json:
-        json.dump([{'measure': b, 'beat': bt, 'symbol': m21.pitch.Pitch(r).name + q,
+        json.dump([{'measure': b, 'beat': bt, 'symbol': spell(r, key) + q,
                     'root_pc': r, 'quality': q,
-                    'bass': m21.pitch.Pitch(bs).name if bs is not None else None,
+                    'bass': spell(bs, key) if bs is not None else None,
                     'fit': sc} for b, bt, r, q, bs, sc in rows],
                   open(args.json, 'w'), ensure_ascii=False, indent=2)
         print(f'wrote {args.json}')
