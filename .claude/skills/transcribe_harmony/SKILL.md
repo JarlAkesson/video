@@ -155,7 +155,30 @@ Read its docstring only if it misbehaves. What matters at this level:
    guessed wrong or a place the accompaniment was misread, and both are worth
    knowing. Expect the accompaniment to change chord more often than inference
    does — that is detail, not disagreement.
-7. Emit `harmony_transcription.json`, and optionally write the chords onto the
+7. **Write the chart the way a player reads it.** Three house rules, all
+   implemented by `chords_per_bar.py` and all learned from a musician's edits:
+
+   - **Plain triads by default — unless the bass line says otherwise.** A slash
+     chord needs support: either the bass bar reads cleanly (complete, and the
+     bass note sounding at the onset), or the inversion carries a **stepwise
+     bass line**, which outranks the per-bar evidence. `G/D` and `G/B` were
+     over-specified from bass bars that did not fill their meter and became
+     plain triads. `D/F#` sits on an equally bad bar and is still correct: the
+     preceding `A7/G` puts the seventh in the bass, a seventh resolves down by
+     step, and F# carries the line G → F# → E into Em. Voice leading is better
+     evidence than one bar's bass reading — do not simplify a slash chord that
+     is holding a line together.
+   - **A symbol on beat 1 of every bar.** A bar whose only chord sits on beat 2
+     leaves nothing to play at the downbeat and breaks the harmonic rhythm.
+     Where beat 1 has no confident reading, state the following chord's root
+     plain (D before D7) and mark it editorial — it regularises the rhythm and
+     is not a claim about that beat.
+   - **Function over literal bass.** A triad on its fifth resolving to the
+     DOMINANT is a cadential 6-4 and takes the bass name (G/D before D7 is
+     `D`). The same sonority resolving to the tonic is not (`G`), and `C/G`
+     going to `G` stays `C`.
+
+8. Emit `harmony_transcription.json`, and optionally write the chords onto the
    score with `--mscz`.
 
 ## Output

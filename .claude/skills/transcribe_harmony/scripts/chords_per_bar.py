@@ -14,6 +14,41 @@ caller reliably forgets:
               decide it. What actually separated right from wrong was phrase
               structure and harmonic function, neither of which the scorer sees.
 
+  --inversions solid
+              Prefer the plain triad. A slash chord is kept only when the bass
+              reading actually supports it: the bass part's measure must sum to
+              the bar, and the named bass note must sound at the chord's onset.
+              Book 6 song 2 named G/D from a bass bar holding a single 1-beat D
+              in 2/4, and G/B from a bar whose bass summed to 4 beats in 2/4 --
+              both were over-specified from junk, and a musician replaced both
+              with plain triads while keeping the one inversion whose bass bar
+              was complete. An inversion stripped by this test is RESTORED when
+              it carries a stepwise bass line (see below), because voice leading
+              is better evidence than one bar's bass reading.
+
+  stepwise bass (always applied)
+              A seventh in the bass must resolve down by step, and the chord
+              that receives it is real even where the OMR read that bar badly.
+              D/F# between A7/G and Em gives the bass G -> F# -> E; the slash
+              is kept because of the line, not because of the bar.
+
+  cadential 6-4 (always applied)
+              A triad with its FIFTH in the bass, resolving to a chord rooted
+              on that bass note WHERE THAT ROOT IS THE DOMINANT, is named for
+              the bass: G/D before D7 in G major is the dominant arriving, so it
+              is written D. The same G-over-D at a phrase end that goes to G is
+              a tonic and stays G; C/G going to G is a subdominant and stays C.
+              Literal bass spelling cannot tell these apart; the function of
+              what follows can.
+
+  --fill-beat-one
+              Every bar gets a symbol on beat 1. A bar whose only chord sits on
+              beat 2 leaves a reader with nothing to play at the downbeat and
+              breaks the harmonic rhythm. Where beat 1 has no confident reading
+              of its own, the following chord's root is stated plain (D before
+              D7) and marked "editorial": it regularises the rhythm and is not
+              claimed as a transcription of that beat.
+
   --restate-on-repeat
               Re-state the harmony where the melody repeats an earlier bar. A
               running diff suppresses the returning tonic at the head of a new
@@ -64,6 +99,15 @@ def main():
     ap.add_argument('--restate-on-repeat', action='store_true',
                     help='re-state the chord when the melody bar repeats an '
                          'earlier bar, even if the harmony has not moved')
+    ap.add_argument('--inversions', choices=['solid', 'all', 'never'],
+                    default='solid',
+                    help="'solid' (default) keeps a slash chord only when the "
+                         "bass bar is complete and the bass note sounds at the "
+                         "onset; 'all' trusts every bass reading; 'never' emits "
+                         "plain triads only")
+    ap.add_argument('--no-fill-beat-one', dest='fill_beat_one',
+                    action='store_false',
+                    help='allow bars whose first symbol falls after beat 1')
     ap.add_argument('--keep-inversions', action='store_true',
                     help='treat a changed bass as a change worth reporting')
     a = ap.parse_args()
@@ -124,12 +168,111 @@ def main():
             prev = ident
             first_in_bar = False
 
+    # ---- bass evidence, per bar ------------------------------------------
+    bass_parts = [p for p in acc if p.partName != 'AccompRH']
+
+    def bass_info(num, lo_beat):
+        """(bass bar is complete, pitch classes sounding at this beat)."""
+        total, sounding = 0.0, set()
+        onset = (lo_beat - 1) * beat
+        for bp in bass_parts:
+            for m in bp.getElementsByClass(m21.stream.Measure):
+                if m.number != num:
+                    continue
+                total += sum(float(x.quarterLength) for x in m.recurse().notesAndRests)
+                for n in m.recurse().notes:
+                    st = float(n.offset)
+                    if st <= onset + 1e-6 < st + float(n.quarterLength):
+                        sounding |= {x.pitchClass for x in n.pitches}
+        span_ = max((float(m.barDuration.quarterLength)
+                     for bp in bass_parts
+                     for m in bp.getElementsByClass(m21.stream.Measure)
+                     if m.number == num), default=0.0)
+        return (span_ > 0 and abs(total - span_) < 1e-6), sounding
+
+    # ---- cadential 6-4: a triad on its fifth, resolving to that bass ------
+    # G/D before D7 is the dominant arriving, so it is named D. The same
+    # G-over-D that goes to G is a phrase-ending tonic and stays G. Only what
+    # FOLLOWS separates them, so this must run before inversions are stripped.
+    cadential = set()
+    for i, (bar, bt, root, qual, bs, fit) in enumerate(rows):
+        if bs is None or (root + 7) % 12 != bs % 12:
+            continue
+        # It must resolve to the DOMINANT to be cadential. Requiring only
+        # "next chord is rooted on the bass" also matches C/G -> G, which is a
+        # subdominant going home to the tonic, and renaming that to G loses the
+        # C entirely.
+        nxt = rows[i + 1] if i + 1 < len(rows) else None
+        dominant_pc = key.pitchFromDegree(5).pitchClass
+        if (nxt and nxt[2] % 12 == bs % 12 and bs % 12 == dominant_pc):
+            rows[i] = (bar, bt, bs % 12, '', None, fit)
+            cadential.add((bar, bt))
+
+    # ---- inversion policy -------------------------------------------------
+    orig_bass = {i: r[4] for i, r in enumerate(rows)}
+    for i, (bar, bt, root, qual, bs, fit) in enumerate(rows):
+        if bs is None or (bar, bt) in cadential:
+            continue
+        if a.inversions == 'never':
+            rows[i] = (bar, bt, root, qual, None, fit)
+        elif a.inversions == 'solid':
+            complete, sounding = bass_info(bar, bt)
+            if not (complete and (bs % 12) in sounding):
+                rows[i] = (bar, bt, root, qual, None, fit)
+
+    # ---- restore an inversion that carries a STEPWISE BASS LINE -----------
+    # Bass evidence per bar is the wrong instrument for this. A seventh sitting
+    # in the bass is obliged to resolve down by step, and the inversion that
+    # receives it is real even when that bar's bass reading is junk: across
+    # song 2's m9-m11 the bass runs G (the 7th of A7) -> F# -> E into Em, so
+    # D/F# belongs there however badly the OMR read bar 10. Restore a stripped
+    # bass when it forms three steps in a consistent direction with the chords
+    # either side.
+    def eff(i):
+        r = rows[i]
+        return (r[4] if r[4] is not None else r[2]) % 12
+
+    stepwise = set()
+    if a.inversions == 'solid':
+        for i, (bar, bt, root, qual, bs, fit) in enumerate(rows):
+            cand = orig_bass.get(i)
+            if bs is not None or cand is None or i == 0 or i + 1 >= len(rows):
+                continue
+            prev_b, next_b, c = eff(i - 1), eff(i + 1), cand % 12
+            down = ((prev_b - c) % 12 in (1, 2)) and ((c - next_b) % 12 in (1, 2))
+            up = ((c - prev_b) % 12 in (1, 2)) and ((next_b - c) % 12 in (1, 2))
+            if down or up:
+                rows[i] = (bar, bt, root, qual, cand, fit)
+                stepwise.add((bar, bt))
+
+    # ---- beat 1 of every bar carries a symbol ------------------------------
+    editorial = set()
+    if a.fill_beat_one:
+        by_bar = {}
+        for r in rows:
+            by_bar.setdefault(r[0], []).append(r)
+        for bar, rs in by_bar.items():
+            rs.sort(key=lambda r: r[1])
+            if rs[0][1] <= 1 + 1e-6:
+                continue
+            _, _, root, qual, _, fit = rs[0]
+            plain = qual[:-1] if qual.endswith('7') else qual   # D7 -> D
+            rows.append((bar, 1.0, root, plain, None, fit))
+            editorial.add((bar, 1.0))
+    rows.sort(key=lambda r: (r[0], r[1]))
+
     for (bar, bt, root, qual, bs, fit) in rows:
         sym = A.spell(root, key) + qual
         bass = A.spell(bs, key) if bs is not None else None
         if bass and bass != A.spell(root, key):
             sym += '/' + bass
         warn = '   <-- provisional, check the bar' if fit < a.flag_fit else ''
+        if (bar, bt) in editorial:
+            warn = '   <-- editorial: beat-1 fill, not a reading of this beat'
+        elif (bar, bt) in cadential:
+            warn = '   <-- cadential 6-4 named for its bass'
+        elif (bar, bt) in stepwise:
+            warn = '   <-- inversion kept: stepwise bass line'
         print('  m%-3s beat %-3s %-9s fit %s%s' % (bar, round(bt, 2), sym, round(fit, 2), warn))
     print('%d chord(s)' % len(rows))
     for (bar, bt, sym, fit) in dropped:
@@ -142,7 +285,10 @@ def main():
                                'symbol': A.spell(r, key) + q,
                                'bass': A.spell(bs, key) if bs is not None else None,
                                'fit': round(f, 2),
-                               'provisional': f < a.flag_fit}
+                               'provisional': f < a.flag_fit,
+                               'editorial': (b, bt) in editorial,
+                               'cadential_64': (b, bt) in cadential,
+                               'stepwise_bass': (b, bt) in stepwise}
                               for (b, bt, r, q, bs, f) in rows]},
                   open(a.json, 'w'), indent=1)
         print('wrote', a.json)
