@@ -34,6 +34,14 @@ a score readable by music21 whose parts include an accompaniment
 (.musicxml, .mxl, .mid) — typically a melody plus a piano grand staff
 ```
 
+**When the melody SHARES a staff with the accompaniment** (SMOM book 6 and any
+other piano-vocal engraving on two staves), do not subtract the melody before
+naming chords. It is not a foreign part there: it doubles chord tones, and
+removing it strips the very thirds the reader needs. Subtracting it from book 6
+song 1 left bare bass notes, killed the fit, and silently deleted the dominants
+— bar 4 lost the C# of its A7, bar 5 lost the F# of its D. Split with
+`clean-omr-transcription`'s `split_shared_staff.py --keep-melody`.
+
 ## Tools
 
 ### `../analyze_music/scripts/extract_basic_metadata.py`
@@ -47,6 +55,33 @@ python3 .claude/skills/analyze_music/scripts/extract_basic_metadata.py <score>
 
 It reports only the *first* time signature, so check the score for mid-piece
 changes, and recompute the measure count if an anacrusis shifts the barring.
+
+### `scripts/chords_per_bar.py`
+
+**Prefer this over calling `accompaniment_chords.py` directly.** `analyse()`
+threads the previously emitted chord into `segment()` AND skips any window whose
+root matches it. Those two rules compound on a song that sits on its tonic
+between cadences: once D is emitted the segmenter is nudged to keep hearing D,
+the D windows are dropped as "no change", and the dominant between them is never
+surfaced at all. Book 6 song 1 lost every chord in bars 3-6 that way — an A
+dominant and the tonic returns around it — and the missing cadences were what a
+musician noticed first.
+
+```bash
+scripts/chords_per_bar.py score.musicxml --key "D major" --restate-on-repeat
+```
+
+It reads each bar with no prior context, then de-duplicates, so "report only
+changes" no longer hides a real change. Two rules it adds:
+
+- `--restate-on-repeat` re-states the harmony where the MELODY repeats an
+  earlier bar. A running diff bares the head of a repeated phrase, because its
+  first chord equals the last one emitted several bars earlier. This is detected
+  from repeated melody bars, so **reconcile the melody first** (see
+  `clean-omr-transcription`'s `reconcile_repeats.py`) — on an unreconciled
+  melody the repeats do not match and nothing restates.
+- A chord symbol on the pickup bar is suppressed; harmony starts at the first
+  full bar.
 
 ### `scripts/accompaniment_chords.py`
 
@@ -89,17 +124,28 @@ Read its docstring only if it misbehaves. What matters at this level:
 3. Identify which part carries the melody and confirm it. Auto-detection
    picks the most monophonic part, which is wrong wherever the accompaniment
    is thinner than the tune. Prefer `--melody-ref` against a known score.
-4. Derive the chords, then **work the fit scores**. A low fit means the window
-   did not spell a chord cleanly; those bars get opened against the source.
-   This is not optional and not a summary statistic: a signal that is computed,
-   printed and never acted on is worse than none, because it looks like
-   checking. If you do not open them, say so in the report.
+4. Derive the chords, then **work the fit scores — but never gate on them.**
+   A low fit means the window did not spell a chord cleanly, so the bar gets
+   opened against the source. It does NOT mean the chord is wrong, and fit
+   cannot be thresholded: measured against a hand-corrected book 6 song 1, the
+   chords the musician KEPT scored 8.44-13.8 and the ones deleted scored
+   7.57-12.8. A cut at 10 would have deleted three correct chords — two
+   dominants and a mediant — while keeping four wrong ones, including a chord
+   on a pickup bar. `chords_per_bar.py --min-fit` therefore defaults to 0;
+   `--flag-fit` marks a chord provisional instead. Opening the flagged bars is
+   not optional: a signal that is computed, printed and never acted on is worse
+   than none, because it looks like checking. If you do not open them, say so.
    `--check`'s stranded-note test will not save you: a wrong chord closely
    related to the right one (the relative minor, say) still contains the
    melody notes and passes. A `SUSPECT` bar is different in kind — the
    input is damaged there, so no amount of scoring recovers it; report
    the chord as provisional or read that bar off the page yourself.
-5. Sanity-check what survives. A chord whose root is foreign to the key may be
+5. Sanity-check what survives, against the IDIOM as well as the key. A chord
+   this composer would not write is a misread, not a discovery: `Em7b5/G` and a
+   chromatic `E7` in a Tegnér children's song were both artifacts of feeding the
+   reader a damaged accompaniment, and both resolved to plain `G` and `Em` once
+   the input was fixed. Ask what the piece is before believing an exotic chord.
+   A chord whose root is foreign to the key may still be
    real (a chromatic mediant at a climax, a passing diminished) or a misread
    accidental — decide by looking, not by rule. Misread accidentals in a flat
    key are the common case: impossible spellings like C-flat, or E-flat minor

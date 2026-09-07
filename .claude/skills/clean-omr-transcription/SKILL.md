@@ -14,6 +14,22 @@ Turn raw Audiveris + music21 output into a score a musician can trust.
 note — they repair or report. When one reports a problem it cannot fix, decide;
 don't reach for a fix that trades notes for tidiness.
 
+**Never pad a short bar with rests.** Padding makes every bar sum to its meter,
+so `verify_score.py` reports "0 problems" while notes and dots are missing —
+book 6 song 1 was delivered that way, verifying clean with four dropped dots
+and two absent notes. A short bar is a visible defect; a padded one is an
+invisible one. `split_shared_staff.py` leaves holes open and reports them;
+`--pad-holes` exists but is for a score already reconciled. Note that music21
+re-pads incomplete measures when it WRITES, so completeness must be judged from
+notes, never from a written file.
+
+**Exhaust the repeats before reaching for the scan.** These books are strophic:
+the same phrase is stated three or four times and the OMR damages each copy
+differently, so the correct reading of a damaged bar is usually already in the
+file. `reconcile_repeats.py` recovered four of the eight bars a musician had to
+fix by hand in book 6 song 1, at no cost, and declined the other four instead
+of guessing.
+
 **Never invent rhythm.** Dotted notes and tuplets must not appear where the
 source has none. Both are created the same way — by a repair reaching for a
 longer note value to make a bar add up — and neither is caught by any check of
@@ -40,6 +56,13 @@ scripts/find_title_bands.py book.pdf --out /tmp/bands --first-page 4
 #    Keep the .omr and raw exports NEXT TO THE BOOK, not in a session
 #    scratchpad -- it is ~10 min of CPU and scratch gets wiped.
 
+# 3b. If the melody SHARES a staff with the accompaniment (see "Shared staff")
+scripts/split_shared_staff.py raw/song_01.mxl --out-base out/song_01
+
+# 3c. Reconcile repeated bars BEFORE looking at the scan -- cheapest repair
+scripts/reconcile_repeats.py out/song_01_melody_raw.musicxml --apply \
+    -o out/song_01_melody.musicxml
+
 # 4. Clean each raw export
 scripts/normalize_measures.py raw/*.mxl --out-dir out --melody-only \
     --composer "..."
@@ -61,7 +84,32 @@ false positives outnumber its true ones — clef blobs, open noteheads, text
 above the staff, accidental spellings — suppress those classes first. Chasing
 a noisy checker costs more than fixing it.
 
-**For a melody-only job, crop the melody staff out and run Audiveris on that**
+## Shared staff: when there is no melody staff to crop
+
+Check the engraving before assuming a separate melody staff. SMOM books 1-5
+print melody + piano grand staff (3 staves per system); **book 6 prints the
+vocal line INSIDE the piano treble staff** (2 staves per system, verses set
+between them). There the crop route below does not exist, `melody_staves.py
+--per-system 3` finds nothing usable, and Audiveris' voice numbering does not
+track the melody — in book 6 song 1 voice 1 filled only 9 of 17 bars.
+
+Use `split_shared_staff.py`: the melody is the top line, recovered as a skyline
+(highest pitch at each onset). Two failures are systematic and expected —
+dropped dots on the dotted-eighth+sixteenth figure, and melody notes that share
+a notehead with the right hand, where the OMR merges them into one chord and the
+melody inherits the ACCOMPANIMENT's duration. Run `reconcile_repeats.py` next;
+it fixes both wherever the bar repeats one that read cleanly.
+
+Also read the page geometry before trusting either staff finder: both
+`find_title_bands.py` and `melody_staves.py` have their gap and minimum-height
+constants tuned for portrait pages. Book 6's landscape scans (768x500pt) render
+too small at the default `--scale`, so every staff fails the five-line test.
+Raise `--scale` and check the reported staff count against a page you have
+looked at. If the book has a printed contents page, reading it is far cheaper
+than reading title bands.
+
+**For a melody-only job on a 3-staff book, crop the melody staff out and run
+Audiveris on that**
 — `scripts/melody_staves.py book.pdf --pages 15-17 -o mel.pdf`, one system per
 page (leave `--dpi` alone; Audiveris refuses images over 20M pixels). The
 accompaniment is what scrambles part assignment: a grand staff below the vocal
@@ -166,7 +214,11 @@ Five things no script can settle:
   (`references/rare-repairs.md` names the three that can).
 - **`anacrusis-rejected-by-arithmetic`** — a bar looked like a padded pickup
   but pickup + final didn't complete a bar. Check the source before overriding
-  with `--anacrusis always`.
+  with `--anacrusis always`. Overriding does NOT fix the final bar: it unpads
+  the pickup and leaves the arithmetic unbalanced. If the source engraves an
+  upbeat, the final bar has to be shortened to complete it (pickup 0.5 + final
+  1.5 = one 2/4 bar), which is what a musician corrected by hand on book 6
+  song 1.
 
 ## Naming
 
