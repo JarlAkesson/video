@@ -266,16 +266,12 @@ def segment(measures, span, beat, key, prev_chord=None, max_spans=3):
                     if set(w) <= tones:
                         segs.append((lo, None))
                         continue
-                # A pedal identified over the whole bar need not sound in
-                # every window of it. Where it is silent it is holding
-                # nothing, so it is not this window's bass either.
-                pedw = ped if (ped is not None and ped in w) else None
-                if pedw is not None and len(w) > 2:
+                if ped is not None and len(w) > 2:
                     w = dict(w)
-                    w[pedw] *= PEDAL_WEIGHT
+                    w[ped] *= PEDAL_WEIGHT
                 root, qual, bs, sc = score_chord(
-                    w, b if pedw is None else None, prev[0] if prev else None, key)
-                segs.append((lo, (root, qual, pedw if pedw is not None else bs, sc)))
+                    w, b if ped is None else None, prev[0] if prev else None, key)
+                segs.append((lo, (root, qual, ped if ped is not None else bs, sc)))
                 tot += sc * (hi - lo) / span
                 prev = (root, qual)
             tot -= SPLIT_PENALTY * k
@@ -401,19 +397,14 @@ def check(melody, rows, ts, key):
                 if off >= (c[0] - 1) * beat - 1e-9:
                     cur = c
             tones = {(cur[1] + i) % 12 for i in QUALITIES[cur[2]]}
-            # The melody part is not always monophonic -- a hymn setting puts
-            # chords in it -- so test every pitch and track the top voice.
-            if {p.pitchClass for p in note.pitches} & tones:
+            if note.pitch.pitchClass in tones:
                 continue
-            top = max(note.pitches, key=lambda p: p.midi)
             i = [k for k, (o, _) in enumerate(ev) if o == off][0]
             if i + 1 < len(ev):
                 nx = ev[i + 1][1]
-                nxtop = max(nx.pitches, key=lambda p: p.midi)
-                if (abs(nxtop.midi - top.midi) <= 2
-                        and {p.pitchClass for p in nx.pitches} & tones):
+                if abs(nx.pitch.midi - note.pitch.midi) <= 2 and nx.pitch.pitchClass in tones:
                     continue
-            problems.append(f'm{m.number} {top.nameWithOctave}@beat'
+            problems.append(f'm{m.number} {note.nameWithOctave}@beat'
                             f'{off / beat + 1:g} stranded under '
                             f'{m21.pitch.Pitch(cur[1]).name}{cur[2]}')
     diatonic = {key.pitchFromDegree(i).pitchClass for i in range(1, 8)}
