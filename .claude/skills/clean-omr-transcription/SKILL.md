@@ -1,6 +1,6 @@
 ---
 name: clean-omr-transcription
-description: Post-OMR cleanup pipeline for scanned sheet music - turns raw Audiveris MusicXML into a trustworthy melody-only or melody+accompaniment MusicXML/MuseScore score. Covers song-boundary splitting, scan-resolution tuning, non-destructive measure-length repair, anacrusis and tuplet correctness, melody selection, and voice/hidden-element cleanup. Complements sheet2xml, which only runs the OMR engine.
+description: Post-OMR cleanup pipeline for scanned sheet music - turns raw Audiveris MusicXML into a trustworthy melody-only or melody+accompaniment MusicXML/MuseScore score. Covers song-boundary splitting, scan-resolution tuning, non-destructive measure-length repair, anacrusis and tuplet correctness, melody selection, voice cleanup, and the fallback route of measuring the melody off the page when the OMR's rhythm cannot be repaired. Complements sheet2xml, which only runs the OMR engine.
 allowed-tools: Read Bash Grep Glob Write Edit
 argument-hint: [raw-omr-musicxml-or-source-pdf]
 effort: medium
@@ -10,245 +10,213 @@ effort: medium
 
 Turn raw Audiveris + music21 output into a score a musician can trust.
 
-**Governing principle: melody-note accuracy wins.** The scripts never delete a
-note — they repair or report. When one reports a problem it cannot fix, decide;
-don't reach for a fix that trades notes for tidiness.
+Two routes, and picking the wrong one is the most expensive mistake available
+here. **Route A repairs the OMR file. Route B measures the melody off the page
+and uses the OMR only for accompaniment.** Test one song both ways before
+committing a book.
 
-**Never pad a short bar with rests.** Padding makes every bar sum to its meter,
-so `verify_score.py` reports "0 problems" while notes and dots are missing —
-book 6 song 1 was delivered that way, verifying clean with four dropped dots
-and two absent notes. A short bar is a visible defect; a padded one is an
-invisible one. `split_shared_staff.py` leaves holes open and reports them;
-`--pad-holes` exists but is for a score already reconciled. Note that music21
-re-pads incomplete measures when it WRITES, so completeness must be judged from
-notes, never from a written file.
+## Four rules that outrank everything
 
-**Exhaust the repeats before reaching for the scan.** These books are strophic:
-the same phrase is stated three or four times and the OMR damages each copy
-differently, so the correct reading of a damaged bar is usually already in the
-file. `reconcile_repeats.py` recovered four of the eight bars a musician had to
-fix by hand in book 6 song 1, at no cost, and declined the other four instead
-of guessing.
+1. **Melody-note accuracy wins.** The scripts repair or report, never delete.
+   When one reports a problem it cannot fix, decide; don't reach for a fix that
+   trades notes for tidiness.
+2. **Never pad a short bar with rests.** Padding makes every bar sum to its
+   meter, so `verify_score.py` reports "0 problems" while notes and dots are
+   missing — book 6 song 1 was delivered that way, verifying clean with four
+   dropped dots and two absent notes. A short bar is a visible defect; a padded
+   one is invisible. `--pad-holes` is for a score already reconciled. music21
+   re-pads incomplete measures when it WRITES, so judge completeness from notes,
+   never from a written file.
+3. **Exhaust the repeats before reaching for the scan.** These books are
+   strophic, and the OMR damages each statement of a phrase differently, so a
+   damaged bar's correct reading is usually already in the file.
+   `reconcile_repeats.py` recovered four of the eight bars a musician had to fix
+   by hand in book 6 song 1, at no cost, and declined the other four rather than
+   guess.
+4. **Never invent rhythm.** Dots and tuplets must not appear where the source
+   has none. Both arise the same way — a repair reaching for a longer note value
+   to make a bar add up — and no check of measure length, note count or voices
+   catches either. `normalize_measures.py` counts them before and after every run
+   and reports an increase as `INVENTED`. Treat that as a defect;
+   `references/rare-repairs.md` names the three repairs that can cause it.
 
-**Never invent rhythm.** Dotted notes and tuplets must not appear where the
-source has none. Both are created the same way — by a repair reaching for a
-longer note value to make a bar add up — and neither is caught by any check of
-measure length, note count or voices; a bar full of invented dotted quarters
-passes all three. `normalize_measures.py` therefore counts dotted and tuplet
-elements before and after every run and reports any increase as `INVENTED`.
-Treat that as a defect, not a note: the rules and the reasoning are in
-`references/rare-repairs.md`, and the specific traps are listed there.
+Rules live in `scripts/`, not here. Run them; read them only if one misbehaves.
+Paths below are relative to this skill's directory.
 
-The rules live in `scripts/`, not in this file. Run them; read them only if one
-misbehaves. All paths below are relative to this skill's directory.
-
-## Pipeline
+## Common first steps
 
 ```bash
-# 1. Before blaming OMR quality, check the scan geometry
+# Before blaming OMR quality, check the scan geometry
 scripts/fix_pdf_geometry.py book.pdf --report
 scripts/fix_pdf_geometry.py book.pdf -o book_fixed.pdf   # if it says REBUILD
 
-# 2. Find where each song starts (see "What needs your eyes")
+# Find where each song starts (you read the composites; see "your eyes")
 scripts/find_title_bands.py book.pdf --out /tmp/bands --first-page 4
 
-# 3. Run Audiveris per song range (sheet2xml, or -sheets N-M on an .omr).
-#    Keep the .omr and raw exports NEXT TO THE BOOK, not in a session
-#    scratchpad -- it is ~10 min of CPU and scratch gets wiped.
+# Then Audiveris per song range (sheet2xml, or -sheets N-M on an .omr).
+# Keep the .omr and raw exports NEXT TO THE BOOK, not in a session scratchpad:
+# it is ~10 min of CPU and scratch gets wiped.
+```
 
-# 3b. If the melody SHARES a staff with the accompaniment (see "Shared staff")
+## Route A — repair the OMR
+
+For when the OMR's rhythm is broadly right and the damage is measure-length
+noise.
+
+```bash
+# If the melody SHARES a staff with the accompaniment (references/engraving.md)
 scripts/split_shared_staff.py raw/song_01.mxl --out-base out/song_01
 
-# 3c. Reconcile repeated bars BEFORE looking at the scan -- cheapest repair
+# Reconcile repeats BEFORE looking at the scan -- cheapest repair there is
 scripts/reconcile_repeats.py out/song_01_melody_raw.musicxml --apply \
     -o out/song_01_melody.musicxml
 
-# 4. Clean each raw export
 scripts/normalize_measures.py raw/*.mxl --out-dir out --melody-only \
     --composer "..."
 
-# 5. Verify what was actually delivered — including the .mscz if you ship one
+# Verify what was actually DELIVERED, including the .mscz if you ship one
 scripts/verify_score.py out/*.musicxml --max-voices 1
 scripts/verify_score.py out/*.mscz --max-voices 1
 ```
 
-`normalize_measures.py` verifies its own output, so step 5 matters most for
-files that went through another tool (a `.mscz` round trip, a manual edit).
+`normalize_measures.py` verifies its own output, so the last step matters most
+for files that went through another tool (a `.mscz` round trip, a manual edit).
 Both scripts exit non-zero on any problem, so they gate a loop.
+`verify_score.py` also prints **rhythm suspects** — bars where a dot was probably
+dropped. It names them; you settle them against the scan.
+`references/reports.md` says what each report means.
 
-`verify_score.py` also prints **rhythm suspects** — bars where a dot was
-probably dropped. It names the bars; you settle them against the scan.
+## Route B — measure the melody off the page
 
-Check any advisory's precision before investigating a single flag. If its
-false positives outnumber its true ones — clef blobs, open noteheads, text
-above the staff, accidental spellings — suppress those classes first. Chasing
-a noisy checker costs more than fixing it.
+For when the OMR's rhythm is not repairable: a printed duet, an engraving whose
+dots Audiveris drops wholesale, a part assigned to the wrong staff. This is how
+SMOM books 6 and 8 were delivered. The OMR is still used — for accompaniment
+sonorities, and as a rhythm hypothesis to check against.
 
-## Shared staff: when there is no melody staff to crop
+The melody becomes an explicit measured table (pitch, duration) and the score is
+built from it, rather than repaired into existence. Per-book drivers live beside
+the book; the general instruments are here:
 
-Check the engraving before assuming a separate melody staff. SMOM books 1-5
-print melody + piano grand staff (3 staves per system); **book 6 prints the
-vocal line INSIDE the piano treble staff** (2 staves per system, verses set
-between them). There the crop route below does not exist, `melody_staves.py
---per-system 3` finds nothing usable, and Audiveris' voice numbering does not
-track the melody — in book 6 song 1 voice 1 filled only 9 of 17 bars.
+```bash
+scripts/songpass.py 15 --key -1        # ALL reconnaissance for one song
+scripts/read_heads.py --page 24 --sys 1 --key -1 --x 0.30,0.40   # one window
+scripts/pitchruler.py 24 1 --staff 0 --x 0.30,0.40 --n 2 -o /tmp/b.png
+```
 
-Use `split_shared_staff.py`: the melody is the top line, recovered as a skyline
-(highest pitch at each onset). Two failures are systematic and expected —
-dropped dots on the dotted-eighth+sixteenth figure, and melody notes that share
-a notehead with the right hand, where the OMR merges them into one chord and the
-melody inherits the ACCOMPANIMENT's duration. Run `reconcile_repeats.py` next;
-it fixes both wherever the bar repeats one that read cleanly.
+`songpass.py` first. For every system of every page a song occupies it reports
+the real barlines, the noteheads grouped into bars (pitch, hollow/filled, dots,
+stacks), the accompaniment clustered into named sonorities, and the OMR's own
+skyline and per-offset accompaniment — then checks its bar count against the
+OMR's and says whether they reconcile.
 
-Also read the page geometry before trusting either staff finder: both
-`find_title_bands.py` and `melody_staves.py` have their gap and minimum-height
-constants tuned for portrait pages. Book 6's landscape scans (768x500pt) render
-too small at the default `--scale`, so every staff fails the five-line test.
-Raise `--scale` and check the reported staff count against a page you have
-looked at. If the book has a printed contents page, reading it is far cheaper
-than reading title bands.
+Keep the two readings side by side rather than merging them: **this kind of OMR
+is reliable for rhythm and unreliable for pitch, octave, dots and accidentals;
+the scan is the other way round.** Where they agree, a bar is settled with no
+image at all. Where they disagree, that bar — and only that bar — is worth
+rendering. A disagreement in the bar COUNT is information, not an error: on two
+of four SMOM 8 songs tested it was the OMR that was wrong, and the page reading
+matched the delivered table both times.
 
-**For a melody-only job on a 3-staff book, crop the melody staff out and run
-Audiveris on that**
-— `scripts/melody_staves.py book.pdf --pages 15-17 -o mel.pdf`, one system per
-page (leave `--dpi` alone; Audiveris refuses images over 20M pixels). The
-accompaniment is what scrambles part assignment: a grand staff below the vocal
-line makes Audiveris hand measures to the wrong part, silently drop a page, or
-die outright (`Denominator is zero` at every resolution, clean once the piano
-was gone). Settle the route on ONE song run both ways before committing a whole
-book to either, then keep the loser as a second pass: two readings of the same
-staves disagree only where one is wrong, so every difference is a bar to open
-the scan on. Diff them by note sequence, not bar number — one disagreement
-about a pickup shifts every later bar.
+`OMR_SRC` selects the book PDF; `OMR_BOOK` the directory holding `song_map.tsv`
+and the OMR exports (default: the working directory).
+
+**Choosing between the routes:** read `references/engraving.md` first — whether
+the melody has a staff of its own decides most of this. Then settle it on ONE
+song run both ways and keep the loser as a second pass — two readings of the same staves disagree only where
+one is wrong, so every difference is a bar to open the scan on. **Diff by note
+sequence, not bar number**; one disagreement about a pickup shifts every later
+bar.
 
 ## What needs your eyes
 
 **Read the key signature off the page yourself, once per song, before anything
-else.** Never inherit it from the OMR output. It is a single glance at the front
-of the first system, and getting it wrong is silent: `read_staff` is *given* the
-key, so it cannot disagree, and a comparison in staff steps cannot either, since
-Bb and B natural sit on the same line. One wrong signature quietly rewrites every
-affected note in the piece and everything built on it.
+else.** Never inherit it from the OMR. One glance at the first system, and
+getting it wrong is silent: the readers are *given* the key so they cannot
+disagree, and a comparison in staff steps cannot either, since Bb and B natural
+sit on the same line. One wrong signature quietly rewrites the piece and
+everything built on it.
 
 **Never read pitch off a small crop.** Comparing noteheads to each other by eye
-turns a third into a second. Measure them against the staff lines:
+turns a third into a second. Measure against the staff lines — `read_staff.py`
+for a single line, `read_heads.py` for anything else. Both warn when a staff
+space is under ~60px (re-render larger) or a reading lands between two pitches.
+Rhythm is readable far smaller than pitch is, so a bar whose rhythm you have
+confirmed is **not** thereby pitch-confirmed; check the two separately, per bar.
 
-```bash
-scripts/read_staff.py book.pdf --page 10 --region 0.7,0.11,0.9,0.21 --key -1
-```
+**Match the instrument to the question.** Cheapest to dearest: bar arithmetic, a
+diff of two independent runs, measurement, a rendered image. Never render blind —
+derive the crop window from a measurement first, or you will render the same bar
+three times before it is legible.
 
-**A staff engraved in dyads needs `read_dyads.py` instead.** Two noteheads a
-third apart touch, and the merged blob fails `read_staff`'s height test — so
-most of a duet silently fails to appear, as absent notes rather than an error.
-`read_dyads.py` splits those blobs and prints each stack highest-first, which is
-also how you recover the two parts: upper voice, lower voice.
-
-It prints each notehead's diatonic step and warns when a staff space is under
-~60px (re-render larger) or a reading lands between two pitches. Rhythm is
-readable far smaller than pitch is, so a bar whose rhythm you have confirmed is
-**not** thereby pitch-confirmed — check the two separately, per bar.
-
-**Match the instrument to the question.** They run cheapest to dearest: bar
-arithmetic, then a diff of two independent runs, then measurement, then a
-rendered image. An image is the wrong tool for a pitch — measure it instead;
-the detector is the wrong tool for a dot, a flag or a rest — look at those.
-Never render blind: derive the crop window from a measurement first, or you
-will render the same bar three times before it is legible.
+| question | instrument |
+|---|---|
+| pitch, including dyads and hollow heads | `read_heads.py` — trust it |
+| where the bars are | `songpass.py` (barlines minus notehead x positions) |
+| an augmentation dot | `read_heads.py`, **good precision, partial recall**: one it reports can be trusted, one it does not report proves nothing. Close the bar by arithmetic, or look. |
+| flags, beams, rests, slurs, ties | look at the page |
+| which of two readings is right | render only the bars where they disagree |
 
 Five things no script can settle:
 
-1. **Reading the titles.** `find_title_bands.py` crops and stacks the bands;
-   you read the composites. A scanned PDF has no text layer and the `.omr`
-   usually has no OCR either. Confirm each song runs from its numbered title to
-   just before the next number up.
-2. **Whether a page-range split is safe.** The script reports mid-page bands.
-   Any of them that is a *title* (not lyrics) means a song starts mid-page and
-   page ranges will cut songs in half. Also watch for an unnumbered appendix at
-   the end, and exclude the staff-less pages it lists (extra verses set as text).
-3. **Comparing a render against the scanned source.** The only check that
-   catches a wrong pitch; structural checks never will. Sample the songs with
-   multiple "Voice" parts, irregular measures, or low OMR confidence.
-4. **Any `INVENTED` report.** The count is automatic; deciding whether a
-   genuine increase is justified is not. The only legitimate one seen so far is
-   a degenerate bar whose ornaments were unreadable until it was rescaled.
-5. **Note-count deltas.** Compare raw vs final per part. Expect legitimate
-   movement — tie splitting inflates counts, collapsing duplicate-verse voices
-   or unison doublings reduces them. Localize before treating a delta as loss.
+1. **Song boundaries.** `find_title_bands.py` crops and stacks the bands; you
+   read them — a scanned PDF has no text layer and the `.omr` usually has no OCR.
+   Confirm each song runs from its numbered title to just before the next number
+   up. A mid-page band that is a *title* (not lyrics) means a song starts mid-page
+   and page ranges will cut songs in half. Watch for an unnumbered appendix, and
+   exclude the staff-less pages it lists.
+2. **Comparing a render against the scanned source.** The only check that catches
+   a wrong pitch; structural checks never will. Sample songs with multiple
+   "Voice" parts, irregular measures, or low OMR confidence.
+3. **Any `INVENTED` report.** The count is automatic; judging whether a genuine
+   increase is justified is not. The only legitimate one so far was a degenerate
+   bar whose ornaments were unreadable until it was rescaled.
+4. **Note-count deltas.** Raw vs final, per part. Expect legitimate movement — tie
+   splitting inflates, collapsing duplicate-verse voices or unison doublings
+   reduces. Localize before treating a delta as loss.
+5. **Whether an advisory is worth chasing.** Check its precision before
+   investigating a single flag; if false positives outnumber true ones (clef
+   blobs, open noteheads, text above the staff), suppress those classes first.
 
 ## Defaults that are judgment calls
 
 | Flag | Default | When the default is wrong |
 |---|---|---|
-| `--melody-only` | off | Usually **on** is right: it's cheaper and skips the voice-flattening that endangers tuplets. Ask before transcribing the piano. |
-| `--anacrusis` | `auto` | `auto` unpads a rest-padded pickup only when pickup + final bar completes one bar. Shape alone can't tell a padded pickup from an opening bar the composer wrote full. Use `always` if house style is that every upbeat is engraved as a short pickup bar. |
-| `--no-triplets` | off | Tuplets are kept only where **obvious** — the engine tagged the run AND the bar already sums to its meter with it. An engine tag alone is not evidence: Audiveris emits tuplets as a by-product of misreading a bar. Use this flag to suppress them entirely. |
+| `--melody-only` | off | Pass it unless the piano is in scope: cheaper, and skips the voice-flattening that endangers tuplets. |
+| `--anacrusis` | `auto` | `auto` unpads a rest-padded pickup only when pickup + final bar completes one bar. Shape alone can't tell a padded pickup from an opening bar written full. Use `always` if house style is that every upbeat is a short pickup bar. |
+| `--no-triplets` | off | Tuplets are kept only where **obvious** — the engine tagged the run AND the bar already sums with it. An engine tag alone is not evidence: Audiveris emits tuplets as a by-product of misreading a bar. |
 | `--min-trailing-rests` | 2 | Trailing all-rest bars are deleted once this many follow the last note. |
 | `--max-voices` | 2 | Use 1 for melody-only. |
-
-## When a script reports a problem
-
-- **`OVERLONG`** — a bar the ordered repairs could not fit. See
-  `references/rare-repairs.md`. Never resolve it by deleting a note.
-- **`short`** — a bar under its meter outside the legal pickup/final positions.
-  Usually a missed meter, not a missed note.
-- **`rhythm suspect`** — advisory, never gates. A dropped dot is the one rhythm
-  error that passes every structural check: the bar still fills its meter, so
-  nothing else can see it. Two signals catch it. *Residue*: a bar ending in a
-  rest shorter than a beat is the gap the missing dot left. *Outlier*: a bar
-  that would match a rhythm the song uses elsewhere if one dot were restored —
-  this is the only signal when a dotted-eighth-plus-sixteenth was read as two
-  eighths, which fills the beat exactly and leaves no gap. Both are guesses
-  about where to look, so open the scan for those bars; neither can confirm
-  anything on its own. `--rhythm-support N` sets how many other bars must carry
-  the repaired pattern (default 3; lower flags ordinary bars of four eighths).
-- **`rest in non-primary voice` / `print-object="no"`** — the file will
-  reintroduce hidden rests on the next round trip. Re-run with one voice per
-  staff; see `references/multi-part.md` for why voice numbering misleads here.
-- **`WRITE DID NOT CONVERGE`** — music21's exporter inflated a part's measure
-  count (observed 301 → 418) with no error. `safe_write` already retried from
-  the in-memory score five times. Do not "fix" it by re-parsing and rewriting
-  the written file; that compounds it. Confirm a manual MuseScore fix with the
-  user rather than shipping corruption.
-- **`INVENTED n dotted` / `INVENTED n tuplets`** — a repair added ornaments the
-  source does not have. Do not ship it. Find which repair widened the vocabulary
-  (`references/rare-repairs.md` names the three that can).
-- **`anacrusis-rejected-by-arithmetic`** — a bar looked like a padded pickup
-  but pickup + final didn't complete a bar. Check the source before overriding
-  with `--anacrusis always`. Overriding does NOT fix the final bar: it unpads
-  the pickup and leaves the arithmetic unbalanced. If the source engraves an
-  upbeat, the final bar has to be shortened to complete it (pickup 0.5 + final
-  1.5 = one 2/4 bar), which is what a musician corrected by hand on book 6
-  song 1.
 
 ## Naming
 
 `{BOOK_ABBR}_{book_number}_{song_number:02d}_{slug}_v{version}.musicxml`
 (e.g. `SMOM_1_01_julafton_v1.musicxml`) — `omrlib.deliverable_name()` builds it.
+`BOOK_ABBR` is the book title's initials, fixed once per series; `song_number` is
+order of appearance **in the book**, not OMR sheet numbering; bump `version` when
+replacing an already-delivered set with a materially different transcription, and
+overwrite in place only while still iterating before hand-off.
 
-- `BOOK_ABBR`: initials of the book title, fixed once per series.
-- `song_number`: order of appearance **in the book**, not OMR sheet numbering.
-- `version`: bump when replacing an already-delivered set with a materially
-  different transcription; overwrite in place only while still iterating before
-  hand-off. Restart at `v1` only if the convention itself changes.
-
-**Rename per-song files only.** Leave combined whole-book deliverables under
-their existing names (confirm rather than assuming). On a re-run, output names
+**Rename per-song files only** — leave combined whole-book deliverables under
+their existing names (confirm rather than assume). On a re-run, output names
 derive from the *raw source* filename, so delete stale renamed files first
 instead of expecting overwrites.
 
 ## Process notes
 
-- Re-exporting via `-sheets N-M` produces either `<bookname>.mxl` or
-  `<bookname>.mvtnull.mxl` — check both, or every song silently overwrites the
-  same scratch file. Audiveris ignores `-output` for `.omr` input and writes
-  beside the book.
-- Don't run Audiveris books in parallel; CPU-heavy steps (SYMBOLS/BEAMS)
-  throttle each other even with idle cores.
+- `-sheets N-M` produces either `<bookname>.mxl` or `<bookname>.mvtnull.mxl` —
+  check both, or every song silently overwrites the same scratch file. Audiveris
+  ignores `-output` for `.omr` input and writes beside the book.
+- Don't run Audiveris books in parallel; SYMBOLS/BEAMS throttle each other even
+  with idle cores.
 - Never raise Audiveris's `maxPixelCount` to allow native resolution — large
   images hit a hardcoded step timeout regardless of the pixel cap.
 
 ## Conditional references
 
-- `references/multi-part.md` — grand staff and combined-book assembly. Load
-  only when accompaniment or a whole-book score is in scope.
+- `references/engraving.md` — how a book is engraved, which staff finder to use,
+  and the shared-staff route. Load before starting a new book.
+- `references/reports.md` — what each reported problem means and what to do.
+  Load when one fires.
+- `references/multi-part.md` — grand staff and combined-book assembly. Load only
+  when accompaniment or a whole-book score is in scope.
 - `references/rare-repairs.md` — bars that resist the ordered repairs.
