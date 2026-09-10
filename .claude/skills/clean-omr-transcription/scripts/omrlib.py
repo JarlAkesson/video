@@ -901,42 +901,6 @@ def strip_instruments(part):
 # Voices
 # ---------------------------------------------------------------------------
 
-def remove_empty_voices(mm):
-    for v in list(mm.voices):
-        if not [e for e in v.recurse().notesAndRests if not e.isRest]:
-            mm.remove(v)
-
-
-def consolidate_voices(mm, max_voices=2):
-    voices = list(mm.voices)
-    if len(voices) <= max_voices:
-        return
-    voices.sort(key=lambda v: len([e for e in v.recurse().notesAndRests if not e.isRest]),
-                reverse=True)
-    keep, excess = voices[:max_voices], voices[max_voices:]
-
-    def clashes(voice, a, b):
-        for e in voice.notesAndRests:
-            if e.isRest:
-                continue
-            s = float(e.offset)
-            t = s + float(e.duration.quarterLength)
-            if s < b - 1e-9 and t > a + 1e-9:
-                return True
-        return False
-
-    for v in excess:
-        for e in list(v.notesAndRests):
-            if e.isRest:
-                continue
-            a = float(e.offset)
-            b = a + float(e.duration.quarterLength)
-            target = next((k for k in keep if not clashes(k, a, b)), keep[0])
-            v.remove(e)
-            target.insert(a, e)
-        mm.remove(v)
-
-
 def flatten_to_single_voice(mm, expected, allowed):
     """Collapse every voice of a measure into one, as chords with ties.
 
@@ -1604,10 +1568,3 @@ def set_metadata(score, title=None, composer=None):
     if composer:
         score.metadata.composer = composer
 
-
-def name_parts(score, melody_name='Melody', piano_name='Piano'):
-    for p in score.parts:
-        if p.id == 'Melody' or (p.partName or '') == 'Melody':
-            p.partName, p.partAbbreviation = melody_name, 'Mel.'
-        elif 'piano' in (p.partName or '').lower():
-            p.partName, p.partAbbreviation = piano_name, 'Pno.'
