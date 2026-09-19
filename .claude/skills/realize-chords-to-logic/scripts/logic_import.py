@@ -4,6 +4,8 @@
   logic_import.py front                      restore + raise the Logic window
   logic_import.py shot [out.png]             raise Logic, capture, print px->pt scale
   logic_import.py import-midi FILE.mid [--tempo import|skip]
+  logic_import.py goto BAR                   playhead to BAR 1 1 1 (Navigate > Go To > Position)
+  logic_import.py move-to-playhead           Edit > Move > To Playhead on the SELECTED regions
   logic_import.py solo RX RY EX EY           select ONLY the region at (RX,RY): click empty
                                              space (EX,EY) first, then the region
   logic_import.py drag X1 Y1 X2 Y2           mouse drag, SCREEN POINTS (not pixels)
@@ -72,6 +74,23 @@ def import_midi(path, tempo="import"):
     print("imported", path, "| tempo:", tempo)
 
 
+def goto(bar):
+    front()
+    se('click menu item "Position…" of menu 1 of menu item "Go To" of menu 1 of '
+       'menu bar item "Navigate" of menu bar 1')
+    time.sleep(1.2)
+    se(f'keystroke "{int(bar)} 1 1 1"\ndelay 0.6\nkey code 36')
+    time.sleep(1)
+
+
+def move_to_playhead():
+    """Regions right after an import are selected; this moves them all to the playhead."""
+    front()
+    se('click menu item "To Playhead" of menu 1 of menu item "Move" of menu 1 of '
+       'menu bar item "Edit" of menu bar 1')
+    time.sleep(1.2)
+
+
 def solo(rx, ry, ex, ey):
     """Two regions are selected after an import; dragging both to the Chord Track
     shows 'Create Multiple Chord Groups' and drops nothing. A plain click on the
@@ -104,6 +123,8 @@ if __name__ == "__main__":
     elif cmd == "import-midi":
         t = a[a.index("--tempo") + 1] if "--tempo" in a else "import"
         import_midi(a[1], t)
+    elif cmd == "goto": goto(a[1])
+    elif cmd == "move-to-playhead": move_to_playhead()
     elif cmd == "solo": solo(*a[1:5])
     elif cmd == "drag": drag(*a[1:5])
     else: sys.exit(__doc__)
