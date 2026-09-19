@@ -19,3 +19,9 @@ assets/
 **/__pycache__/
 third_party/*
 !third_party/.gitkeep
+# Swedish Christmas MusicXML collection (local, untracked)
+musicxml/
+Songs after David/
+
+# Logic sessions and bounces for the Christmas songs
+Christmas_songs_Logic+Bounces/
