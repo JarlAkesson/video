@@ -150,7 +150,7 @@ three times before it is legible.
 
 | question | instrument |
 |---|---|
-| pitch, including dyads and hollow heads | `read_heads.py` — trust it |
+| pitch, including dyads | `read_heads.py` — trust what it reports. It intermittently **misses hollow heads** (half notes, and a parenthesised ossia), at every dpi, so a bar that comes up empty or a half-note short means look |
 | where the bars are | `songpass.py` (barlines minus notehead x positions) |
 | an augmentation dot | `read_heads.py`, **good precision, partial recall**: one it reports can be trusted, one it does not report proves nothing. Close the bar by arithmetic, or look. |
 | flags, beams, rests, slurs, ties | look at the page |

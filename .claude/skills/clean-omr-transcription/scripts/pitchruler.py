@@ -24,7 +24,15 @@ sys.path.insert(0, __import__('os').path.dirname(
     __import__('os').path.abspath(__file__)))
 import staff_comb
 
-SRC = "/Users/User/Documents/GitHub/video/MaiSTRO - Claude/Alice_Tegnér_Sjung_med_oss_mamma_8_song_piano.pdf"
+# Book-agnostic like staff_comb.SRC (OMR_SRC env var) -- this used to hardcode
+# book 8's path independently of staff_comb, which meant a page render could
+# silently come from the WRONG BOOK while the staff geometry (read via
+# staff_comb.systems, which DOES honor OMR_SRC) was correct: book 9's page 7
+# rendered as book 8's page 7, with plausible-looking but wrong lyrics, and
+# nothing about the image looked broken enough to catch by eye.  staff_comb.SRC
+# is imported directly (not re-read from the env here) so the two never drift
+# apart again.
+SRC = staff_comb.SRC
 TREBLE = ['F5', 'E5', 'D5', 'C5', 'B4', 'A4', 'G4', 'F4', 'E4']
 BASS = ['A3', 'G3', 'F3', 'E3', 'D3', 'C3', 'B2', 'A2', 'G2']
 SCALE = 'CDEFGAB'
@@ -81,12 +89,36 @@ try:
     font = ImageFont.truetype('/System/Library/Fonts/Supplemental/Arial.ttf', 46)
 except OSError:
     font = ImageFont.load_default()
+
+
+def local_lines(lo, hi):
+    """The staff's lines measured inside ONE tile, not across the whole system.
+
+    A scanned system bows: on book 8 p25 s1 the staff at x~0.8 sits ~20 px
+    (half a staff position) higher than the straight whole-system fit, so a
+    ruler drawn from that fit labels every notehead one step low there -- a
+    hollow C5 read as D5.  Each tile re-fits its own lines; if the narrow
+    window finds a different staff count, the whole-system fit is kept.
+    """
+    try:
+        st_l, H_l, _ = staff_comb.systems(a.page, per=a.staves,
+                                          x0=max(0.0, lo), x1=min(1.0, hi))
+        if len(st_l) == len(st):
+            return [v / H_l * H for v in st_l[(a.sys - 1) * a.staves + a.staff]]
+    except Exception:
+        pass
+    return lines
+
+
 y = 0
 for im, lo, hi in tiles:
     out.paste(im, (GUT, y))
-    for nm, ry in zip(names, rows):
+    ll = local_lines(lo, hi)
+    hl = (ll[-1] - ll[0]) / 8.0
+    rows_l = [(ll[0] - a.pad * hl) + i * hl for i in range(len(names))]
+    for nm, ry in zip(names, rows_l):
         yy = y + (ry / H - y0) / (y1 - y0) * im.height
-        on = lines[0] - 0.5 * half <= ry <= lines[-1] + 0.5 * half
+        on = ll[0] - 0.5 * hl <= ry <= ll[-1] + 0.5 * hl
         col = (0, 130, 255) if on else (255, 60, 60)
         dr.line([(GUT, yy), (W, yy)], fill=col, width=2)
         dr.text((4, yy - 24), nm, fill=col, font=font)
