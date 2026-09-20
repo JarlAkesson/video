@@ -3,6 +3,8 @@
 
 usage: chord_spec.py <lead sheet .mscz|.musicxml> --starts 5[,15,25] [--leadin-bar 1]
 
+--starts = Logic bar of SONG BAR 1 (with a pickup bar the first downbeat is start+1).
+
 Each section is the whole song starting at a Logic bar (--starts). Bars before the
 first section, and any gap between sections, hold the tonic. Only CHANGE points (plus every
 section's first downbeat) are printed (the Chord Track sustains), as `bar:name` or `bar.beat:name`, ready for
@@ -20,6 +22,7 @@ def main():
     ap.add_argument("src")
     ap.add_argument("--starts", required=True, help="comma list of Logic bars where each section starts")
     ap.add_argument("--leadin-bar", type=int, default=1)
+    ap.add_argument("--tonic", help="override the key analysis, e.g. F or Bb or F#m")
     a = ap.parse_args()
     src = os.path.abspath(a.src)
     with tempfile.TemporaryDirectory() as t:
@@ -30,7 +33,7 @@ def main():
         s = converter.parse(xml)
     part = s.parts[0]
     k = s.analyze("key")
-    tonic = k.tonic.name.replace("-", "b") + ("m" if k.mode == "minor" else "")
+    tonic = a.tonic or (k.tonic.name.replace("-", "b") + ("m" if k.mode == "minor" else ""))
     ts = part.flatten().getElementsByClass(meter.TimeSignature)[0]
     beat_q = 4 / ts.denominator
     measures = list(part.getElementsByClass("Measure"))
@@ -42,9 +45,11 @@ def main():
             song.append((m.number - first_no, 1 + c.offset / beat_q, name))
     events = [(a.leadin_bar, 1.0, tonic)]
     starts = [int(x) for x in a.starts.split(",")]
+    forced = set()                              # each section's first chord is always emitted
     for st in starts:
         for bar_i, beat, name in song:
             events.append((st + bar_i, beat, name))
+        forced.add((st + song[0][0], song[0][1]))
         end = st + len(measures)
         events.append((end, 1.0, tonic))        # tonic after each section (gap / ending)
     at = {}
@@ -52,7 +57,7 @@ def main():
         at[(bar, beat)] = name
     out, cur = [], None
     for (bar, beat), name in sorted(at.items()):
-        if name == cur and not (beat == 1 and bar in starts):   # always mark section starts
+        if name == cur and (bar, beat) not in forced:
             continue
         cur = name
         out.append(f"{bar}:{name}" if beat == 1 else f"{bar}.{beat:g}:{name}")

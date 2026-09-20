@@ -56,9 +56,9 @@ def import_midi(path, tempo="import"):
     path = os.path.abspath(path)
     assert os.path.exists(path), path
     front()
-    # 1. playhead to bar 1: the import lands at the playhead
-    se('click button "Go to Beginning" of group 1 of window 1')
-    time.sleep(0.6)
+    # 1. playhead to bar 1. (Logic imports MIDI at bar 1 regardless, but keep it tidy.)
+    #    The transport's "Go to Beginning" button is missing in some projects - use the menu.
+    goto(1)
     # 2. File > Import > MIDI File...
     se('click menu item "MIDI File…" of menu 1 of menu item "Import" of menu 1 of '
        'menu bar item "File" of menu bar 1')
