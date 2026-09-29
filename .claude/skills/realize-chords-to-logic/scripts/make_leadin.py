@@ -31,7 +31,7 @@ def main():
             xml = os.path.join(t, "lead.musicxml"); subprocess.run([MSCORE, "-o", xml, src], capture_output=True)
         s = converter.parse(xml)
     k = s.analyze("key")
-    figure = k.tonic.name + ("m" if k.mode == "minor" else "")
+    else "")
     syms = [c.figure for c in s.parts[0].flatten().getElementsByClass(harmony.ChordSymbol)]
     ts = s.parts[0].flatten().getElementsByClass(meter.TimeSignature)[0]
     bar_q = ts.barDuration.quarterLength

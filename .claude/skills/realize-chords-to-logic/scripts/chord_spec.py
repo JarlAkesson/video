@@ -17,6 +17,19 @@ from realize_chords import MSCORE
 from music21 import converter, harmony, meter
 
 
+def logic_name(figure):
+    """music21's figure as Logic's chord popover wants it typed.
+
+    Logic reads "Edim7/Bb" and "G7b9", not music21's "Eo7/Bb" or "G7 add b9"
+    (SMOM 4 songs 4 and 10). Anything else is passed through with b for the flat.
+    """
+    n = figure.replace("-", "b")
+    for a, b in ((" add b9", "b9"), (" add #9", "#9"), (" alter b5", "b5"),
+                 ("o7", "dim7"), ("o", "dim"), ("/o7", "m7b5"), ("+", "aug")):
+        n = n.replace(a, b)
+    return n.replace(" ", "")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("src")
@@ -41,7 +54,7 @@ def main():
     song = []                                   # (song bar index from 0, beat, name)
     for m in measures:
         for c in m.flatten().getElementsByClass(harmony.ChordSymbol):
-            name = c.figure.replace("-", "b")
+            name = logic_name(c.figure)
             song.append((m.number - first_no, 1 + c.offset / beat_q, name))
     events = [(a.leadin_bar, 1.0, tonic)]
     starts = [int(x) for x in a.starts.split(",")]

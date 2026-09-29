@@ -82,6 +82,35 @@ def bar_ticks(tracks, div):
     return div * 4, "4/4"
 
 
+def song_bars(tracks, div):
+    """[(ticks, FF58 event)] for every song bar, following mid-song meter changes."""
+    sigs = sorted({(t, e) for ev in tracks for t, e in ev if e[:2] == b"\xFF\x58"})
+    if not sigs or sigs[0][0] != 0:
+        sigs.insert(0, (0, b"\xFF\x58\x04\x04\x02\x18\x08"))
+    end = max(t for ev in tracks for t, e in ev if not is_setup(e))
+    bars, t = [], 0
+    while t < end:
+        e = [s for s in sigs if s[0] <= t][-1][1]
+        ln = div * 4 * e[3] // 2 ** e[4]
+        bars.append((ln, e)); t += ln
+    return bars
+
+
+def logic_bars(song, starts, upto):
+    """Bar map of the whole Logic layout: lead-in in the song's first meter, each section
+    in the song's own meters, gaps and the ending in the meter the song ends in."""
+    out = []
+    for b in range(1, upto + 1):
+        k = [s for s in starts if s <= b]
+        if not k:
+            out.append(song[0])
+        elif b - k[-1] < len(song):
+            out.append(song[b - k[-1]])
+        else:
+            out.append(song[-1])
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("src"); ap.add_argument("--starts", required=True); ap.add_argument("--out")
@@ -90,13 +119,25 @@ def main():
     fmt, div, tracks = read(a.src)
     bt, sig = bar_ticks(tracks, div)
     starts = [int(x) for x in a.starts.split(",")]
+    song = song_bars(tracks, div)
+    lbars = logic_bars(song, starts, max(starts) + len(song) + (a.end_bar or 0) + 4)
+    bar_at = [0]
+    for ln, _ in lbars:
+        bar_at.append(bar_at[-1] + ln)          # bar_at[b-1] = tick where Logic bar b starts
+    changes = [(bar_at[i], e) for i, (ln, e) in enumerate(lbars)
+               if i and e[3:5] != lbars[i - 1][1][3:5]]      # meter changes after tick 0
+    sig_track = next((i for i, ev in enumerate(tracks) if any(e[:2] == b"\xFF\x58" for t, e in ev)), 0)
+    if changes:
+        print("meter changes at Logic bars", [bar_at.index(t) + 1 for t, _ in changes])
     out_tracks = []
-    for ev in tracks:
+    for ti, ev in enumerate(tracks):
         setup = [(0, e) for t, e in ev if t == 0 and is_setup(e) and e[:2] != b"\xFF\x2F"]
         notes = [(t, e) for t, e in ev if not is_setup(e)]
         new = list(setup)
+        if ti == sig_track:
+            new += changes
         for s in starts:
-            off = (s - 1) * bt
+            off = bar_at[s - 1]
             new += [(t + off, e) for t, e in notes]
         new.sort(key=lambda x: x[0])   # stable: keep the source's order within a tick
                                        # (unison voices emit on/off/on at one tick)
@@ -116,9 +157,11 @@ def main():
         pc = (pc + a.tonic[1:].count("#") - a.tonic[1:].count("b")) % 12
         root = 60 + pc
         third = 3 if a.minor else 4
-        t0, ring = (a.end_bar - 1) * bt, 3 * bt
-        num = int(sig.split("/")[0]); den = int(sig.split("/")[1])
-        pick = bt // num if (num, den) == (3, 4) else bt // 2
+        t0, ring = bar_at[a.end_bar - 1], bar_at[a.end_bar + 2] - bar_at[a.end_bar - 1]
+        pb, pe = lbars[a.end_bar - 2]                  # the bar before the ending
+        num, den = pe[3], 2 ** pe[4]
+        pick = pb // num if (num, den) == (3, 4) else pb // 2
+        bt = pb                                         # for the printout below
         voicing = [root - 24, root - 12 + third, root]
         dom = root - 24 - 5
 
@@ -144,7 +187,7 @@ def main():
         # track order -> Logic tracks 9, 10, 11: Ending (piano), block chords, melody
         out_tracks = [ending, out_tracks[1], melody]
         print(f"ending bar {a.end_bar}: melody {root} v69; piano {voicing} v58, 3 bars; "
-              f"dominant {dom} at {(t0 - pick) / bt + 1:.3f} for {pick} ticks")
+              f"dominant {dom} at {a.end_bar - 1 + (pb - pick) / pb:.3f} for {pick} ticks")
     out = a.out or os.path.splitext(a.src)[0] + "_logic.mid"
     with open(out, "wb") as f:
         f.write(b"MThd" + struct.pack(">IHHH", 6, 1, len(out_tracks), div))

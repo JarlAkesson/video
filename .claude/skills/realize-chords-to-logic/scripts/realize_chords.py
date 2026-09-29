@@ -92,8 +92,13 @@ def build(src_musicxml, out_musicxml):
     for meas in p1.findall("measure"):
         n = int(meas.get("number"))
         m2 = ET.SubElement(p2, "measure", number=str(n))
-        if meas.find("attributes") is not None and n == int(p1.find("measure").get("number")):
-            m2.append(copy.deepcopy(meas.find("attributes")))
+        at = meas.find("attributes")
+        if at is not None and n == int(p1.find("measure").get("number")):
+            m2.append(copy.deepcopy(at))
+        elif at is not None and at.find("time") is not None:   # meter change (SMOM 3 song 17)
+            a2 = ET.SubElement(m2, "attributes"); a2.append(copy.deepcopy(at.find("time")))
+        if at is not None and at.find("time") is not None:
+            bar_q = int(at.findtext("time/beats")) * 4 / int(at.findtext("time/beat-type"))
         hs = meas.findall("harmony"); cs_list = syms.get(n, [])
         if len(hs) != len(cs_list):
             sys.exit(f"bar {n}: {len(hs)} <harmony> vs {len(cs_list)} ChordSymbols")

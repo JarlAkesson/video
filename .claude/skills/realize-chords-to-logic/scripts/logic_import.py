@@ -75,10 +75,28 @@ def import_midi(path, tempo="import"):
 
 
 def goto(bar):
+    """Playhead to a bar - typing only ever goes into the open Go To Position dialog.
+
+    When the menu click does not take, the digits reach the arrange window as key
+    commands and move the playhead somewhere else (this scrambled a whole Chord Track).
+    """
     front()
-    se('click menu item "Position…" of menu 1 of menu item "Go To" of menu 1 of '
-       'menu bar item "Navigate" of menu bar 1')
-    time.sleep(1.2)
+    se("key code 53")            # a popover or menu still open swallows the menu click
+    time.sleep(0.4)
+    names = lambda: osa('tell application "System Events" to tell process "Logic Pro" '
+                        'to get name of every window')
+    for _ in range(4):
+        se('click menu item "Position…" of menu 1 of menu item "Go To" of menu 1 of '
+           'menu bar item "Navigate" of menu bar 1')
+        for _ in range(8):
+            time.sleep(0.4)
+            if "Go To Position" in names():
+                break
+        else:
+            continue
+        break
+    else:
+        sys.exit("Go To Position dialog did not open")
     se(f'keystroke "{int(bar)} 1 1 1"\ndelay 0.6\nkey code 36')
     time.sleep(1)
 
